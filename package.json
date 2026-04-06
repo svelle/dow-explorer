@@ -1,11 +1,14 @@
 {
   "name": "dow-sga-browser",
   "private": true,
-  "description": "Bun bundles js/main.js → dist/main.js. Use bun dev (watch + server) or bun run preview (build + serve).",
+  "description": "Bun bundles js/three-global.js and js/main.js into dist/. Use bun dev (watch + serve) or bun run preview (build + serve).",
   "scripts": {
     "dev": "bun run dev.ts",
     "start": "bun run dev.ts",
-    "build": "bun build js/main.js --outdir=dist --target=browser --minify --sourcemap",
+    "build": "bun build js/three-global.js --outdir=dist --target=browser --minify --sourcemap && bun build js/main.js --outdir=dist --target=browser --minify --sourcemap",
     "preview": "bun run build && bun run serve.ts"
+  },
+  "dependencies": {
+    "three": "0.160.0"
   }
 }

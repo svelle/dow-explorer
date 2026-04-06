@@ -72,7 +72,11 @@ export function loadPreview() {
       var displayName = SGA.fileName(arch, f.index);
 
       if (name.endsWith(".whm")) {
-        setPreviewWhm(data, displayName);
+        var whmLogical =
+          typeof SGA.logicalPathForFile === "function"
+            ? SGA.logicalPathForFile(arch, f.index)
+            : displayName;
+        setPreviewWhm(data, whmLogical);
         return;
       }
 

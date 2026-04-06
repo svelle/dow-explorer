@@ -51,3 +51,16 @@ export function readFileAsArrayBuffer(file) {
     r.readAsArrayBuffer(file);
   });
 }
+
+/** True when the environment blocks FileSystemFileHandle.getFile() (e.g. embedded IDE browser, insecure context). */
+export function isFileSystemHandleAccessBlockedError(err) {
+  if (!err || typeof err !== "object") return false;
+  var e = /** @type {{ name?: string, message?: string }} */ (err);
+  if (e.name === "NotAllowedError" || e.name === "SecurityError") return true;
+  var m = String(e.message || "");
+  return (
+    m.indexOf("not allowed by the user agent") !== -1 ||
+    m.indexOf("The request is not allowed") !== -1 ||
+    m.indexOf("user agent or the platform") !== -1
+  );
+}

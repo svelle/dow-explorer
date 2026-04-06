@@ -3,7 +3,8 @@
 import { deleteHandle, loadHandle, saveHandle } from "./handles.js";
 import { addArchiveFromBuffer, pathFromFile } from "./open.js";
 import { state } from "../state.js";
-import { $, basename, uid } from "../util.js";
+import { $, basename, uid, isFileSystemHandleAccessBlockedError } from "../util.js";
+import { showAppNotice } from "../ui/notice.js";
 
 var RECENT_KEY = "sga-browser-recent-files";
 var MAX_RECENT = 20;
@@ -117,9 +118,9 @@ export function openRecentEntry(entry) {
         addArchiveFromBuffer(buf, basename(entry.path), entry.path, null);
       })
       .catch(function (e) {
-        alert(
-          "Could not load from saved path. Use Choose .sga and pick the file again.\n\n" +
-            (e && e.message ? e.message : String(e))
+        showAppNotice(
+          "Could not load from saved path. Use Choose .sga and pick the file again. " +
+            (e && e.message ? "(" + e.message + ")" : "")
         );
       });
     return;
@@ -137,7 +138,19 @@ export function openRecentEntry(entry) {
         });
       })
       .catch(function (e) {
-        alert(e && e.message ? e.message : String(e));
+        var msg;
+        if (isFileSystemHandleAccessBlockedError(e)) {
+          msg =
+            "Cannot reopen this recent file here: the browser blocks file access in this context (e.g. embedded IDE preview). " +
+            "Open the app in Chrome or Edge, or use Choose .sga and select the file again.";
+        } else {
+          msg =
+            e && e.message
+              ? e.message
+              : "Saved file access expired or is unavailable. Use Choose .sga and pick the file again.";
+        }
+        console.warn("[SGA Browser] Recent reopen failed:", e);
+        showAppNotice(msg);
       });
     return;
   }

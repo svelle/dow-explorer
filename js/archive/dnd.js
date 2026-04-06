@@ -44,11 +44,30 @@ export function setupDragAndDrop() {
                     addArchiveFromBuffer(buf, f.name, pathFromFile(f), null);
                   });
                 }
-                return handle.getFile().then(function (file) {
-                  return file.arrayBuffer().then(function (buf) {
-                    addArchiveFromBuffer(buf, file.name, pathFromFile(file), handle);
+                return handle
+                  .getFile()
+                  .then(
+                    function (file) {
+                      return { file: file, keepHandle: true };
+                    },
+                    function () {
+                      var f = item.getAsFile();
+                      if (!f) {
+                        return Promise.reject(new Error("getFile blocked and no File fallback"));
+                      }
+                      return { file: f, keepHandle: false };
+                    }
+                  )
+                  .then(function (x) {
+                    return x.file.arrayBuffer().then(function (buf) {
+                      addArchiveFromBuffer(
+                        buf,
+                        x.file.name,
+                        pathFromFile(x.file),
+                        x.keepHandle ? handle : null
+                      );
+                    });
                   });
-                });
               })
             );
           } else {

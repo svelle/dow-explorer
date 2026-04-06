@@ -67,6 +67,25 @@ function resetWhmPreviewChrome() {
     hint.hidden = false;
     hint.removeAttribute("aria-hidden");
   }
+  var skelLbl = document.querySelector(".preview-whm-skel-label");
+  if (skelLbl) {
+    skelLbl.setAttribute("data-whm-has-skel", "0");
+    skelLbl.hidden = true;
+    skelLbl.setAttribute("aria-hidden", "true");
+  }
+  var animBar = $("preview-whm-anim-bar");
+  if (animBar) {
+    animBar.setAttribute("data-whm-has-anim", "0");
+    animBar.hidden = true;
+    animBar.setAttribute("aria-hidden", "true");
+  }
+  var boneTip = $("preview-whm-bone-tooltip");
+  if (boneTip) {
+    boneTip.hidden = true;
+    boneTip.textContent = "";
+  }
+  var dbgPre = $("preview-whm-debug-body");
+  if (dbgPre) dbgPre.textContent = "";
 }
 
 function resolveCatalogImageSource(entry) {
@@ -314,6 +333,20 @@ function setWhmPreviewMode(mode) {
     displayLabel.hidden = isTex;
     displayLabel.setAttribute("aria-hidden", isTex ? "true" : "false");
   }
+  var skelLbl = document.querySelector(".preview-whm-skel-label");
+  if (skelLbl) {
+    var showSkel = skelLbl.getAttribute("data-whm-has-skel") === "1";
+    var hideSkelChrome = isTex || !showSkel;
+    skelLbl.hidden = hideSkelChrome;
+    skelLbl.setAttribute("aria-hidden", hideSkelChrome ? "true" : "false");
+  }
+  var animBar = $("preview-whm-anim-bar");
+  if (animBar) {
+    var showAnim = animBar.getAttribute("data-whm-has-anim") === "1";
+    var hideAnimChrome = isTex || !showAnim;
+    animBar.hidden = hideAnimChrome;
+    animBar.setAttribute("aria-hidden", hideAnimChrome ? "true" : "false");
+  }
   var hint = $("preview-whm-hint");
   if (hint) {
     hint.hidden = isTex;
@@ -380,7 +413,8 @@ function setupWhmMeshesPanelToggle() {
 
 function setupWhmPreviewChromeAfterLoad() {
   detachWhmTextureUi();
-  resetWhmPreviewChrome();
+  /* Do not call resetWhmPreviewChrome() here: load() already ran after disposeWhm() reset it,
+   * and bindSkelAnimControls just updated the DOM. A second reset would hide skeleton/anim chrome. */
   var modelBtn = $("preview-whm-mode-model");
   var texBtn = $("preview-whm-mode-texture");
   var texWrap = $("preview-whm-texture-wrap");
@@ -486,6 +520,60 @@ export async function resolveWhmTextureFile(pathNoExt) {
   return null;
 }
 
+/**
+ * Load sibling `.whe` animation file for a `.whm` logical path (same stem).
+ * @param {string} whmPath e.g. art/.../unit.whm
+ * @returns {Promise<Uint8Array | null>}
+ */
+/**
+ * @param {string} whmPath — full logical path inside archives (folder + file.whm)
+ * @param {object} [debugOut] — filled when provided: candidates, found, matchedCandidate, …
+ */
+export async function resolveWhmSiblingWhe(whmPath, debugOut) {
+  if (typeof SGA === "undefined" || typeof SGA.findFileByLogicalPath !== "function") {
+    if (debugOut) debugOut.error = "SGA.findFileByLogicalPath unavailable";
+    return null;
+  }
+  var rel = String(whmPath || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+  if (debugOut) {
+    debugOut.normalizedWhmPath = rel;
+    debugOut.skipReason = null;
+  }
+  if (!rel || !/\.whm$/i.test(rel)) {
+    if (debugOut) debugOut.skipReason = "path missing or not .whm (need full archive path, not leaf name only)";
+    return null;
+  }
+  var base = rel.replace(/\.whm$/i, "");
+  var candidates = [base + ".whe", base.replace(/\//g, "\\") + ".whe"];
+  if (debugOut) {
+    debugOut.candidates = candidates.slice();
+    debugOut.matchedCandidate = null;
+    debugOut.found = false;
+    debugOut.byteLength = 0;
+    debugOut.searchArchives = state.archives ? state.archives.length : 0;
+  }
+  for (var ai = 0; ai < state.archives.length; ai++) {
+    var ent = state.archives[ai];
+    if (!ent || !ent.parsed) continue;
+    for (var ci = 0; ci < candidates.length; ci++) {
+      var fe = SGA.findFileByLogicalPath(ent.parsed, candidates[ci]);
+      if (fe) {
+        var data = await SGA.readFileData(ent.parsed, fe);
+        if (debugOut) {
+          debugOut.found = true;
+          debugOut.matchedCandidate = candidates[ci];
+          debugOut.archiveIndex = ai;
+          debugOut.byteLength = data ? data.byteLength || data.length : 0;
+        }
+        return data;
+      }
+    }
+  }
+  return null;
+}
+
 export function setPreviewWhm(u8, fileName) {
   var w = $("preview-whm-wrap");
   var canvas = $("preview-whm-canvas");
@@ -520,7 +608,13 @@ export function setPreviewWhm(u8, fileName) {
   img.hidden = true;
   img.removeAttribute("src");
   var sidebar = $("preview-whm-sidebar");
-  Promise.resolve(WhmPreview.load(u8, canvas, sidebar, resolveWhmTextureFile))
+  resolveWhmSiblingWhe(fileName, null)
+    .then(function (wheBytes) {
+      return WhmPreview.load(u8, canvas, sidebar, resolveWhmTextureFile, {
+        wheBytes: wheBytes,
+        whmLogicalPath: fileName,
+      });
+    })
     .then(function (r) {
       if (!r || !r.ok) {
         w.hidden = true;

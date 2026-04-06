@@ -205,6 +205,27 @@
     return dir + "\\" + leaf;
   }
 
+  /** @returns {number} folder index or -1 */
+  function folderIndexContainingFile(archive, fileIndex) {
+    for (var folderIndex = 0; folderIndex < archive.folders.length; folderIndex++) {
+      var list = listFilesInFolder(archive, folderIndex);
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].index === fileIndex) return folderIndex;
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * Full path inside the archive (folder + leaf, Relic backslashes).
+   * Needed for logical-path lookups such as sibling `.whe` resolution.
+   */
+  function logicalPathForFile(archive, fileIndex) {
+    var fi = folderIndexContainingFile(archive, fileIndex);
+    if (fi < 0) return fileName(archive, fileIndex);
+    return fileFullPath(archive, fi, fileIndex);
+  }
+
   /**
    * Normalize archive paths for comparison (forward slashes, lower case, trim leading slashes).
    * @param {string} p
@@ -337,6 +358,8 @@
     folderPath: folderPath,
     fileName: fileName,
     fileFullPath: fileFullPath,
+    folderIndexContainingFile: folderIndexContainingFile,
+    logicalPathForFile: logicalPathForFile,
     normalizeLogicalPath: normalizeLogicalPath,
     findFileByLogicalPath: findFileByLogicalPath,
     readFileData: readFileData,

@@ -1,6 +1,6 @@
 # Module map (for maintainers and agents)
 
-The app **source** lives under [`js/`](../js/). [`index.html`](../index.html) loads **legacy/global scripts** first (parsers, Three.js, fflate), then **`dist/main.js`**, which is produced by **`bun build js/main.js`** (see [`package.json`](../package.json)). This document describes **roles and dependencies at the source level**, not the minified bundle.
+The app **source** lives under [`js/`](../js/). [`index.html`](../index.html) loads **legacy/global scripts** first (parsers, fflate), then **`dist/three-global.js`** (bundled Three.js → `globalThis.THREE`), then **`whm-preview.js`**, then **`dist/main.js`**. Bun builds **`js/three-global.js`** and **`js/main.js`** into `dist/` (see [`package.json`](../package.json)). This document describes **roles and dependencies at the source level**, not the minified bundles.
 
 ---
 
@@ -8,6 +8,7 @@ The app **source** lives under [`js/`](../js/). [`index.html`](../index.html) lo
 
 | Path | Role |
 |------|------|
+| [`js/three-global.js`](../js/three-global.js) | **Three.js shim entry**: `import * as THREE from "three"` then **`globalThis.THREE = THREE`** so `whm-preview.js` and `whm.js` keep using the global. Built to **`dist/three-global.js`**. |
 | [`js/main.js`](../js/main.js) | **Application entry**: `init()` wires DOM events (splash, file picker, filters, tree/file keyboard, theme, sidebar, preview buttons, drag-and-drop). Calls `setRenderMainForPathBar(renderMain)` so the path bar can trigger `renderMain` without importing `files/view.js` (avoids a circular dependency). |
 | [`js/state.js`](../js/state.js) | **`state`** — shared mutable object: `archives`, `activeArchiveId`, `selection`, `selectedFileIndex`, `viewMode`, `expanded`, preview/grid/tree fields, `pathCrumbPopupClose`, etc. Exports **`getActiveArchive()`**. |
 | [`js/util.js`](../js/util.js) | **`$`**, **`uid`**, **`basename`**, **`esc`**, **`formatHex`**, **`readFileAsArrayBuffer`**. Small DOM and string helpers used across the app. |
@@ -65,6 +66,7 @@ The app **source** lives under [`js/`](../js/). [`index.html`](../index.html) lo
 | Path | Role |
 |------|------|
 | [`splash.js`](../js/ui/splash.js) | **`updateSplash`** (splash vs app-root visibility), **`renderArchives`** (archive tabs + `renderPins`). |
+| [`notice.js`](../js/ui/notice.js) | **`showAppNotice(message)`** — fixed top banner (`#app-notice`) for errors such as blocked `FileSystemFileHandle` in embedded browsers; used by **recent** reopened failures. |
 | [`path-bar.js`](../js/ui/path-bar.js) | **`renderPathBar`**, **`closePathCrumbPopup`**, **`setRenderMainForPathBar`** — breadcrumb navigation; `renderMain` injected to avoid importing `files/view.js`. |
 | [`pins.js`](../js/ui/pins.js) | **Pinned folders** (`localStorage`), `archiveStorageKey`, `pinKey`, `loadPinsRaw`, `savePinsRaw`, `isFolderPinned`, **`togglePinForTarget`**, **`renderPins`**. Pin navigation uses **dynamic `import()`** of `tree/render`, `files/view`, `ui/inspector` to avoid circular imports. |
 | [`theme.js`](../js/ui/theme.js) | **Palette / appearance**: `readPaletteAppearance`, `resolveThemeId`, `setDataThemeFromId`, `syncThemeControls`, `applyPaletteAppearance`, legacy key migration. |
@@ -89,7 +91,7 @@ These are **not** part of the ES module graph; they attach globals used by the b
 | [`js/chunky.js`](../js/chunky.js) | Relic **Chunky** helpers — **`Chunky`** global (e.g. RSH path). |
 | [`js/rsh.js`](../js/rsh.js) | **RSH** preview / DDS extraction — **`RSH`** global. |
 | [`js/whm.js`](../js/whm.js) | **WHM** mesh parsing — **`WHM`** global. |
-| `three` (CDN) | **`THREE`** for WHM WebGL preview. |
+| **[`dist/three-global.js`](../js/three-global.js)** (built from npm `three`) | **`THREE`** on `globalThis` for WHM WebGL preview and classic scripts. |
 | [`js/whm-preview.js`](../js/whm-preview.js) | **`WhmPreview`** — loads WHM into canvas + sidebar UI. |
 
 ---
@@ -98,7 +100,7 @@ These are **not** part of the ES module graph; they attach globals used by the b
 
 | Path | Role |
 |------|------|
-| [`dev.ts`](../dev.ts) | **Dev server**: initial `bun build`, **`bun build --watch`**, static `Bun.serve` on port 8080. |
+| [`dev.ts`](../dev.ts) | **Dev server**: initial + watch **`three-global`** and **`main`** bundles, static `Bun.serve` on port 8080. |
 | [`serve.ts`](../serve.ts) | **Static server only** — used after `bun run build` / `bun run preview`. |
 
 ---

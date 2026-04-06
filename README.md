@@ -2,13 +2,13 @@
 
 A browser-based explorer for **Dawn of War — Soulstorm** `.sga` archives: folder tree, file list, previews (textures, audio, WHM mesh, hex/text), and optional ZIP export of a folder.
 
-The UI is bundled with [Bun](https://bun.sh) from `[js/main.js](js/main.js)` into `[dist/main.js](dist/main.js)`. Legacy parsers and globals (`SGA`, `TGA`, `DDS`, `WhmPreview`, etc.) stay as separate scripts referenced from `[index.html](index.html)`.
+The UI is bundled with [Bun](https://bun.sh): `[js/three-global.js](js/three-global.js)` → `dist/three-global.js` (sets `globalThis.THREE` from the [`three`](https://www.npmjs.com/package/three) package), and `[js/main.js](js/main.js)` → `dist/main.js`. Legacy parsers and other globals (`SGA`, `TGA`, `DDS`, `WhmPreview`, etc.) stay as separate scripts in `[index.html](index.html)`.
 
 ## Requirements
 
 - [Bun](https://bun.sh) 1.x (install: see [https://bun.sh/docs/installation](https://bun.sh/docs/installation))
 
-No npm dependencies are required for the scripts in `[package.json](package.json)`.
+The only listed dependency is **`three`** (Three.js), used for the WHM WebGL preview; install with `bun install` if needed.
 
 ## Quick start
 
@@ -18,19 +18,19 @@ cd dow-sga-browser
 bun dev
 ```
 
-Open [http://127.0.0.1:8080/](http://127.0.0.1:8080/). The dev command runs an initial bundle, starts a file watcher that rebuilds `dist/main.js` when you change files under `js/`, and serves the repo root.
+Open [http://127.0.0.1:8080/](http://127.0.0.1:8080/). The dev command runs initial bundles, starts watchers that rebuild `dist/three-global.js` and `dist/main.js` when sources change, and serves the repo root.
 
 ## Scripts
 
 
 | Command                 | Description                                                                              |
 | ----------------------- | ---------------------------------------------------------------------------------------- |
-| `bun dev` / `bun start` | Build once, then watch `js/` → `dist/`, and serve on port `8080` (override with `PORT`). |
-| `bun run build`         | Production bundle: minified `dist/main.js` + source maps.                                |
+| `bun dev` / `bun start` | Build `three-global` + app once, watch both into `dist/`, serve on `8080` (`PORT`).      |
+| `bun run build`         | Production bundles: minified `dist/three-global.js`, `dist/main.js`, and source maps.   |
 | `bun run preview`       | Run `build`, then serve statically (no watch).                                           |
 
 
-After a fresh clone, `dist/` may be missing until you run `bun dev` or `bun run build`. The app entry in `index.html` is `<script type="module" src="dist/main.js">`.
+After a fresh clone, `dist/` may be missing until you run `bun dev` or `bun run build`. `index.html` loads `dist/three-global.js` (Three.js) before `whm-preview.js`, then `dist/main.js`.
 
 ## Using the app
 
@@ -41,6 +41,7 @@ After a fresh clone, `dist/` may be missing until you run `bun dev` or `bun run 
 ## Project layout
 
 - `[docs/MODULES.md](docs/MODULES.md)` — module map (what each `js/` file does; for maintainers and agents).
+- `js/three-global.js` — Bun entry that re-exports Three.js as `globalThis.THREE` for classic scripts.
 - `js/main.js` — application entry (ES modules under `js/`).
 - `js/sga.js`, `js/tga.js`, `js/dds.js`, … — format parsers and preview helpers loaded before the bundle.
 - `dist/` — build output (listed in `.gitignore`; generate locally with Bun).

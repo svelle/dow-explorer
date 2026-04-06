@@ -50,6 +50,12 @@
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
+  <div id="app-notice" class="app-notice" role="alert" hidden>
+    <div class="app-notice-inner">
+      <p id="app-notice-text" class="app-notice-text"></p>
+      <button type="button" id="app-notice-dismiss" class="btn app-notice-dismiss" aria-label="Dismiss message">×</button>
+    </div>
+  </div>
   <div id="splash" class="splash" aria-hidden="false">
     <div class="splash-inner">
       <h2 class="splash-title">Open an archive</h2>
@@ -231,9 +237,10 @@
               >
                 <span class="preview-whm-meshes-toggle-icon" aria-hidden="true">◀</span>
               </button>
-              <aside id="preview-whm-sidebar" class="preview-whm-sidebar" hidden aria-label="Mesh slices"></aside>
+              <aside id="preview-whm-sidebar" class="preview-whm-sidebar" hidden aria-label="Meshes"></aside>
               <div id="preview-whm-canvas-wrap" class="preview-whm-canvas-wrap">
                 <canvas id="preview-whm-canvas" class="preview-whm-canvas" tabindex="-1" aria-label="3D model preview"></canvas>
+                <div id="preview-whm-bone-tooltip" class="preview-whm-bone-tooltip" hidden role="tooltip"></div>
                 <div id="preview-whm-texture-wrap" class="preview-whm-texture-wrap" hidden aria-hidden="true">
                   <canvas id="preview-whm-texture-canvas" class="preview-whm-texture-canvas" aria-label="Diffuse texture"></canvas>
                   <div id="preview-whm-texture-select-row" class="preview-whm-texture-select-row" hidden>
@@ -262,6 +269,39 @@
                     <option value="wireframe">Wireframe</option>
                   </select>
                 </label>
+                <label class="preview-whm-skel-label">
+                  <input type="checkbox" id="preview-whm-show-skeleton" />
+                  Skeleton
+                </label>
+              </div>
+              <div id="preview-whm-anim-bar" class="preview-whm-anim-bar" hidden>
+                <div class="preview-whm-anim-row">
+                  <select id="preview-whm-anim-select" class="preview-whm-anim-select" aria-label="Animation"></select>
+                  <button type="button" id="preview-whm-anim-play" class="btn preview-whm-anim-play" aria-label="Play or pause animation">▶</button>
+                  <input
+                    type="range"
+                    id="preview-whm-anim-scrub"
+                    class="preview-whm-anim-scrub"
+                    min="0"
+                    max="1"
+                    step="0.0001"
+                    value="0"
+                    aria-label="Animation scrub"
+                  />
+                  <span
+                    id="preview-whm-anim-frame"
+                    class="preview-whm-anim-frame"
+                    title="Current frame (1-based) / total frames"
+                  >—</span>
+                  <label class="preview-whm-anim-speed-label"
+                    >Speed
+                    <input type="range" id="preview-whm-anim-speed" min="0.25" max="2" step="0.05" value="1" aria-label="Animation speed" />
+                  </label>
+                  <label class="preview-whm-anim-loop-label">
+                    <input type="checkbox" id="preview-whm-anim-loop" checked />
+                    Loop
+                  </label>
+                </div>
               </div>
               <p id="preview-whm-hint" class="preview-whm-hint">
                 Drag to rotate · wheel to zoom · XYZ gizmo bottom-right
@@ -349,7 +389,8 @@
   <script defer src="js/wtp.js"></script>
   <script defer src="js/ucs.js"></script>
   <script defer src="js/whm.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script defer src="js/whm-skel-anim.js"></script>
+  <script type="module" src="dist/three-global.js"></script>
   <script defer src="js/whm-preview.js"></script>
   <script type="module" src="dist/main.js"></script>
 </body>

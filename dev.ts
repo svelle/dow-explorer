@@ -1,28 +1,33 @@
 /**
- * Development: initial bundle, watch js/ → dist/, and serve on http://127.0.0.1:8080/
+ * Development: initial bundles (Three global + app), watch both → dist/, and serve on http://127.0.0.1:8080/
  */
 import { resolve } from "path";
 
 const root = resolve(import.meta.dir);
 const port = Number(process.env.PORT) || 8080;
 
-const buildArgs = [
-  "bun",
-  "build",
-  "js/main.js",
-  "--outdir=dist",
-  "--target=browser",
-  "--sourcemap",
-];
+const common = ["--outdir=dist", "--target=browser", "--sourcemap"] as const;
+const threeArgs = ["bun", "build", "js/three-global.js", ...common];
+const mainArgs = ["bun", "build", "js/main.js", ...common];
 
-const r = Bun.spawnSync(buildArgs, {
+function runSync(args: string[]) {
+  const r = Bun.spawnSync(args, {
+    cwd: root,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  if (r.exitCode !== 0) process.exit(r.exitCode ?? 1);
+}
+
+runSync(threeArgs);
+runSync(mainArgs);
+
+Bun.spawn([...threeArgs, "--watch"], {
   cwd: root,
   stdout: "inherit",
   stderr: "inherit",
 });
-if (r.exitCode !== 0) process.exit(r.exitCode ?? 1);
-
-Bun.spawn([...buildArgs, "--watch"], {
+Bun.spawn([...mainArgs, "--watch"], {
   cwd: root,
   stdout: "inherit",
   stderr: "inherit",
@@ -48,4 +53,4 @@ Bun.serve({
   },
 });
 
-console.log("Dev — http://127.0.0.1:%d/  (watching js/ → dist/main.js)", port);
+console.log("Dev — http://127.0.0.1:%d/  (watching js/ → dist/three-global.js + dist/main.js)", port);

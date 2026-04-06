@@ -89,12 +89,18 @@
     var numSkinBones = dv.getInt32(off, true);
     off += 4;
 
+    var skinBoneTable = [];
     var bi;
     for (bi = 0; bi < numSkinBones; bi++) {
       var bn = readStr(dv, u8, off);
       off = bn.o;
       if (off + 4 > u8.byteLength) return { ok: false, error: "Truncated skin bone table" };
+      var boneKey = dv.getUint32(off, true);
       off += 4;
+      skinBoneTable.push({
+        key: boneKey,
+        name: (bn.s || "").replace(/\0/g, "").trim(),
+      });
     }
 
     if (off + 8 > u8.byteLength) return { ok: false, error: "Truncated vertex header" };
@@ -118,13 +124,39 @@
       pos[i * 3 + 2] = p.z;
     }
 
-    /* blender_dow: skin block follows whenever num_skin_bones > 0 (not gated on flag bit). */
+    /* blender_dow CH_FOLDMSLC: 3 floats weights, 4× uint8 bone indices (255 = none), 4th weight = 1−sum(w0..2) */
+    var skinWeights = null;
+    var skinIndices = null;
     var hasSkinVertexWeights = numSkinBones > 0;
     if (hasSkinVertexWeights) {
-      /* Per vertex: 3 floats (weights) + 4 uint8 (bone indices) = 16 bytes */
-      var skinSkip = numVertices * 16;
-      if (off + skinSkip > u8.byteLength) return { ok: false, error: "Truncated skin data" };
-      off += skinSkip;
+      skinWeights = new Float32Array(numVertices * 4);
+      skinIndices = new Uint8Array(numVertices * 4);
+      for (i = 0; i < numVertices; i++) {
+        if (off + 16 > u8.byteLength) return { ok: false, error: "Truncated skin data" };
+        var sw0 = dv.getFloat32(off, true);
+        var sw1 = dv.getFloat32(off + 4, true);
+        var sw2 = dv.getFloat32(off + 8, true);
+        off += 12;
+        var sw3 = 1 - (sw0 + sw1 + sw2);
+        if (sw3 < 0) {
+          var sum3 = sw0 + sw1 + sw2;
+          if (sum3 > 1e-8) {
+            sw0 /= sum3;
+            sw1 /= sum3;
+            sw2 /= sum3;
+          }
+          sw3 = 0;
+        }
+        skinWeights[i * 4] = sw0;
+        skinWeights[i * 4 + 1] = sw1;
+        skinWeights[i * 4 + 2] = sw2;
+        skinWeights[i * 4 + 3] = sw3;
+        skinIndices[i * 4] = u8[off];
+        skinIndices[i * 4 + 1] = u8[off + 1];
+        skinIndices[i * 4 + 2] = u8[off + 2];
+        skinIndices[i * 4 + 3] = u8[off + 3];
+        off += 4;
+      }
     }
 
     var nor = new Float32Array(numVertices * 3);
@@ -244,7 +276,92 @@
       rsv0_a: rsv0_a,
       numPolygons: numPolygons,
       vertexSizeId: vertexSizeId,
+      hasSkin: !!(numSkinBones > 0 && skinWeights && skinIndices),
+      skinBoneTable: skinBoneTable,
+      skinWeights: skinWeights,
+      skinIndices: skinIndices,
     };
+  }
+
+  function normBoneName(s) {
+    return String(s || "")
+      .replace(/\0/g, "")
+      .trim()
+      .toLowerCase();
+  }
+
+  function looseBoneName(s) {
+    var n = normBoneName(s);
+    var pipe = n.lastIndexOf("|");
+    if (pipe >= 0) n = n.slice(pipe + 1);
+    return n;
+  }
+
+  /** @returns {{ skinWeights: Float32Array, skinIndices: Uint16Array } | null} */
+  function remapSkinIndicesToSkeleton(mesh, skelBones) {
+    if (!mesh.hasSkin || !mesh.skinIndices || !mesh.skinWeights || !skelBones || !skelBones.length) {
+      return null;
+    }
+    var keyToName = Object.create(null);
+    var ti;
+    for (ti = 0; ti < mesh.skinBoneTable.length; ti++) {
+      var ent = mesh.skinBoneTable[ti];
+      keyToName[ent.key] = ent.name;
+    }
+    var nameToSkel = Object.create(null);
+    var looseToSkel = Object.create(null);
+    var si;
+    for (si = 0; si < skelBones.length; si++) {
+      var snm = normBoneName(skelBones[si].name);
+      nameToSkel[snm] = si;
+      var sl = looseBoneName(skelBones[si].name);
+      if (looseToSkel[sl] === undefined) looseToSkel[sl] = si;
+    }
+    function resolveRaw(raw) {
+      if (raw === 255) return -1;
+      var nm = keyToName[raw];
+      if (nm == null || nm === "") {
+        if (raw < skelBones.length) nm = skelBones[raw].name;
+        else return -1;
+      }
+      var ix = nameToSkel[normBoneName(nm)];
+      if (ix == null) ix = looseToSkel[looseBoneName(nm)];
+      return ix != null ? ix : -1;
+    }
+    var nv = (mesh.positions.length / 3) | 0;
+    var sw = new Float32Array(mesh.skinWeights);
+    var outIdx = new Uint16Array(nv * 4);
+    var vi;
+    for (vi = 0; vi < nv; vi++) {
+      var j;
+      for (j = 0; j < 4; j++) {
+        var raw = mesh.skinIndices[vi * 4 + j];
+        var sk = resolveRaw(raw);
+        if (sk < 0) {
+          outIdx[vi * 4 + j] = 0;
+          sw[vi * 4 + j] = 0;
+        } else {
+          outIdx[vi * 4 + j] = sk;
+        }
+      }
+      var s = sw[vi * 4] + sw[vi * 4 + 1] + sw[vi * 4 + 2] + sw[vi * 4 + 3];
+      if (s > 1e-8) {
+        sw[vi * 4] /= s;
+        sw[vi * 4 + 1] /= s;
+        sw[vi * 4 + 2] /= s;
+        sw[vi * 4 + 3] /= s;
+      } else {
+        sw[vi * 4] = 1;
+        sw[vi * 4 + 1] = 0;
+        sw[vi * 4 + 2] = 0;
+        sw[vi * 4 + 3] = 0;
+        outIdx[vi * 4] = 0;
+        outIdx[vi * 4 + 1] = 0;
+        outIdx[vi * 4 + 2] = 0;
+        outIdx[vi * 4 + 3] = 0;
+      }
+    }
+    return { skinWeights: sw, skinIndices: outIdx };
   }
 
   function typeidKey(t) {
@@ -284,10 +401,13 @@
   function walkFoldMslcRecursive(folderU8, out) {
     Chunky.forEachChunk(folderU8, 0, folderU8.length, function (h, body) {
       var tid = typeidKey(h.typeid);
+      var chunkName = (h.name || "").replace(/\0/g, "").trim();
       if (tid === "FOLDMSLC") {
         Chunky.forEachChunk(body, 0, body.length, function (h2, body2) {
           if (typeidKey(h2.typeid) === "DATADATA") {
-            var parsed = parseMeshSliceDatadata(body2, h.name);
+            var sliceLabel =
+              (h2.name || "").replace(/\0/g, "").trim() || chunkName || "mesh";
+            var parsed = parseMeshSliceDatadata(body2, sliceLabel);
             if (parsed && parsed.ok && meshGeometryOk(parsed)) {
               out.push(parsed);
             }
@@ -401,17 +521,26 @@
   /**
    * @param {object[]} meshes from extractMeshes
    * @param {typeof THREE} THREE
-   * @param {{ matcapTexture?: object | null, textureMap?: Record<string, THREE.Texture> | null }} [options]
+   * @param {{
+   *   matcapTexture?: object | null,
+   *   textureMap?: Record<string, THREE.Texture> | null,
+   *   appendTo?: THREE.Group | null,
+   *   skeleton?: object | null,
+   *   skelBones?: object[] | null,
+   * }} [options]
    * @returns {THREE.Group}
    */
   function buildThreeGroup(meshes, THREE, options) {
     options = options || {};
     var matcapTexture = options.matcapTexture || null;
     var textureMap = options.textureMap || null;
-    var group = new THREE.Group();
+    var skeleton = options.skeleton || null;
+    var skelBones = options.skelBones || null;
+    var group = options.appendTo || new THREE.Group();
     var colorHue = 0;
 
-    function makeMaterial(col, name, shaderName) {
+    function makeMaterial(col, name, shaderName, isSkinnedMesh) {
+      var forSkin = !!isSkinnedMesh;
       var tex = lookupTexture(textureMap, shaderName || "");
       var mat;
       if (tex) {
@@ -427,14 +556,24 @@
         });
         mat.userData.baseColor = new THREE.Color(0xffffff);
       } else if (matcapTexture) {
-        /* Matcaps are pre-lit; tone mapping + ACES otherwise crushes them to black. */
-        mat = new THREE.MeshMatcapMaterial({
-          matcap: matcapTexture,
-          color: col,
-          side: THREE.FrontSide,
-          flatShading: false,
-          toneMapped: false,
-        });
+        /* MeshMatcap is not valid for SkinnedMesh here; skinning is driven by isSkinnedMesh in the renderer. */
+        if (forSkin) {
+          mat = new THREE.MeshStandardMaterial({
+            color: col,
+            metalness: 0.12,
+            roughness: 0.5,
+            side: THREE.FrontSide,
+            flatShading: false,
+          });
+        } else {
+          mat = new THREE.MeshMatcapMaterial({
+            matcap: matcapTexture,
+            color: col,
+            side: THREE.FrontSide,
+            flatShading: false,
+            toneMapped: false,
+          });
+        }
         mat.userData.baseColor = col.clone();
       } else {
         mat = new THREE.MeshStandardMaterial({
@@ -450,13 +589,23 @@
       return mat;
     }
 
-    meshes.forEach(function (m) {
+    meshes.forEach(function (m, sourceIndex) {
       if (!meshGeometryOk(m)) return;
+      var remapped =
+        m.hasSkin && skeleton && skelBones && skelBones.length
+          ? remapSkinIndicesToSkeleton(m, skelBones)
+          : null;
+      var useSkin = !!(remapped && skeleton);
+
       var geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(m.positions, 3));
       geo.setAttribute("normal", new THREE.BufferAttribute(m.normals, 3));
       geo.setAttribute("uv", new THREE.BufferAttribute(m.uvs, 2));
       geo.setIndex(new THREE.BufferAttribute(m.indices, 1));
+      if (useSkin) {
+        geo.setAttribute("skinWeight", new THREE.BufferAttribute(remapped.skinWeights, 4));
+        geo.setAttribute("skinIndex", new THREE.BufferAttribute(remapped.skinIndices, 4));
+      }
 
       var mats = [];
       var mg = m.materialGroups;
@@ -466,14 +615,14 @@
           var hue = ((colorHue + gi) * 0.11) % 1;
           var col = new THREE.Color().setHSL(hue, 0.35, 0.55);
           var sn = mg[gi].shaderName || "";
-          mats.push(makeMaterial(col, sn || "material_" + gi, sn));
+          mats.push(makeMaterial(col, sn || "material_" + gi, sn, useSkin));
           geo.addGroup(mg[gi].start, mg[gi].count, gi);
         }
         colorHue += mg.length;
       } else {
         var hue1 = (colorHue * 0.11) % 1;
         colorHue += 1;
-        mats.push(makeMaterial(new THREE.Color().setHSL(hue1, 0.35, 0.55), null, ""));
+        mats.push(makeMaterial(new THREE.Color().setHSL(hue1, 0.35, 0.55), null, "", useSkin));
       }
 
       /* Normals in the file may not match our triangle winding (u0,u2,u1); recompute for correct shading. */
@@ -482,9 +631,16 @@
       geo.computeBoundingBox();
       geo.computeBoundingSphere();
 
-      var mesh = new THREE.Mesh(geo, mats.length === 1 ? mats[0] : mats);
+      var mesh;
+      if (useSkin) {
+        mesh = new THREE.SkinnedMesh(geo, mats.length === 1 ? mats[0] : mats);
+        mesh.bind(skeleton, mesh.matrixWorld);
+      } else {
+        mesh = new THREE.Mesh(geo, mats.length === 1 ? mats[0] : mats);
+      }
       mesh.name = m.name || "mesh";
       mesh.userData.meshMaterials = mats;
+      mesh.userData.whmSourceMeshIndex = sourceIndex;
       group.add(mesh);
     });
     return group;
@@ -495,5 +651,6 @@
     buildThreeGroup: buildThreeGroup,
     parseMeshSliceDatadata: parseMeshSliceDatadata,
     extractShaderMapFromRsgm: extractShaderMapFromRsgm,
+    findRsgmFolderBody: findRsgmFolderBody,
   };
 })(typeof window !== "undefined" ? window : globalThis);

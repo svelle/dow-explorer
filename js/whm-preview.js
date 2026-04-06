@@ -1,5 +1,5 @@
 /**
- * WebGL preview for .whm meshes (Three.js, classic script + global THREE).
+ * WebGL preview for .whm meshes (Three.js via globalThis.THREE from dist/three-global.js).
  */
 (function (global) {
   "use strict";
@@ -24,16 +24,395 @@
   var rotX = 0;
   var turntableEnabled = false;
   var turntableRadPerSec = 0.22;
-  var lastFrameTime = 0;
+  var WHM_PREVIEW_FPS_CAP = 60;
+  var WHM_PREVIEW_FRAME_MIN_MS = 1000 / WHM_PREVIEW_FPS_CAP;
+  /** Wall clock for 60fps cap; null until first tick after load. */
+  var whmPreviewFpsGateLastMs = null;
+  /** Default framing: camera in +X, +Y, +Z octant toward origin (same as fitCameraToGroup). */
+  var WHM_DEFAULT_VIEW_DIR_X = 0.55;
+  var WHM_DEFAULT_VIEW_DIR_Y = 0.35;
+  var WHM_DEFAULT_VIEW_DIR_Z = 0.75;
   var resizeObserver = null;
   var matcapTexture = null;
   var selectedMeshIndex = -1;
+  /** Maps `extracted.meshes` index → THREE.Mesh/SkinnedMesh (skips skeleton line, ground). */
+  var whmMeshBySourceIndex = [];
   var sidebarRef = null;
   /** @type {{ label: string, texture: object }[]} */
   var textureCatalog = [];
   /** @type {Record<string, number[][]>} shader key (lower) → list of [u0,v0,u1,v1,u2,v2] */
   var uvTrianglesByShader = {};
   var displaySelectHandler = null;
+  var skelArmature = null;
+  var skelBoneObjs = null;
+  /** @type {object | null} THREE.Skeleton shared by SkinnedMesh instances */
+  var whmSharedSkeleton = null;
+  var skelLineGeom = null;
+  var skelLineSeg = null;
+  var skelData = null;
+  var animClips = [];
+  var animClipIndex = 0;
+  var animTime = 0;
+  var animPlaying = false;
+  var animSpeed = 1;
+  var animLoop = true;
+  var skelPointerMoveHandler = null;
+  var skelHoverRaycaster = null;
+  var skelHoverNdc = null;
+  var skelHoverTmp = null;
+  var _skelVA = null;
+  var _skelVB = null;
+  var skelAnimUi = {
+    skeletonChange: null,
+    animSelectChange: null,
+    animPlayClick: null,
+    animScrubInput: null,
+    animScrubPointerDown: null,
+    animSpeedInput: null,
+    animLoopChange: null,
+  };
+
+  function getClipDuration(clip) {
+    if (!clip) return 1;
+    if (clip.duration > 1e-6) return clip.duration;
+    return Math.max(1 / 30, clip.numFrames / 30);
+  }
+
+  function whmHideBoneTooltip() {
+    var tip = document.getElementById("preview-whm-bone-tooltip");
+    if (tip) {
+      tip.hidden = true;
+      tip.textContent = "";
+    }
+  }
+
+  function whmApplyBindPoseToBones(THREE) {
+    if (!THREE || !skelBoneObjs || !skelData || !skelData.bones) return;
+    if (typeof global.WHMSkelAnim === "undefined") return;
+    var b;
+    for (b = 0; b < skelBoneObjs.length; b++) {
+      var sb = skelData.bones[b];
+      var bo = skelBoneObjs[b];
+      var tr = WHMSkelAnim.relicBoneTranslationToMeshPreview(sb.pos[0], sb.pos[1], sb.pos[2]);
+      bo.position.set(tr.x, tr.y, tr.z);
+      WHMSkelAnim.relicBoneQuaternionToMeshPreview(THREE, sb.rot[0], sb.rot[1], sb.rot[2], sb.rot[3], bo.quaternion);
+    }
+  }
+
+  function updateSkelLines(THREE) {
+    if (!THREE || !skelLineGeom || !skelLineSeg || !skelBoneObjs || !skelData || !rootGroup) {
+      return;
+    }
+    if (!_skelVA) _skelVA = new THREE.Vector3();
+    if (!_skelVB) _skelVB = new THREE.Vector3();
+    var attr = skelLineGeom.getAttribute("position");
+    var arr = attr.array;
+    var idx = 0;
+    var i;
+    for (i = 0; i < skelBoneObjs.length; i++) {
+      var pIdx = skelData.bones[i].parentIdx;
+      if (pIdx < 0) continue;
+      skelBoneObjs[i].getWorldPosition(_skelVA);
+      skelBoneObjs[pIdx].getWorldPosition(_skelVB);
+      rootGroup.worldToLocal(_skelVA);
+      rootGroup.worldToLocal(_skelVB);
+      arr[idx++] = _skelVB.x;
+      arr[idx++] = _skelVB.y;
+      arr[idx++] = _skelVB.z;
+      arr[idx++] = _skelVA.x;
+      arr[idx++] = _skelVA.y;
+      arr[idx++] = _skelVA.z;
+    }
+    attr.needsUpdate = true;
+    skelLineGeom.setDrawRange(0, (idx / 3) | 0);
+  }
+
+  function buildSkeletonVisualization(THREE, root, skel) {
+    skelArmature = new THREE.Group();
+    skelArmature.name = "WhmSkelArmature";
+    /* Visible armature: invisible groups can skip matrix updates in some cases; no meshes on this group. */
+    skelArmature.visible = true;
+    skelBoneObjs = [];
+    var i;
+    for (i = 0; i < skel.bones.length; i++) {
+      var bi = skel.bones[i];
+      var o = new THREE.Object3D();
+      o.name = bi.name;
+      if (typeof global.WHMSkelAnim !== "undefined") {
+        var t0 = WHMSkelAnim.relicBoneTranslationToMeshPreview(bi.pos[0], bi.pos[1], bi.pos[2]);
+        o.position.set(t0.x, t0.y, t0.z);
+        WHMSkelAnim.relicBoneQuaternionToMeshPreview(
+          THREE,
+          bi.rot[0],
+          bi.rot[1],
+          bi.rot[2],
+          bi.rot[3],
+          o.quaternion
+        );
+      } else {
+        o.position.set(bi.pos[0], bi.pos[1], -bi.pos[2]);
+      }
+      skelBoneObjs.push(o);
+    }
+    for (i = 0; i < skel.bones.length; i++) {
+      var p = skel.bones[i].parentIdx;
+      if (p >= 0 && p < skelBoneObjs.length) skelBoneObjs[p].add(skelBoneObjs[i]);
+      else skelArmature.add(skelBoneObjs[i]);
+    }
+    root.add(skelArmature);
+    var segCount = 0;
+    for (i = 0; i < skel.bones.length; i++) {
+      if (skel.bones[i].parentIdx >= 0) segCount++;
+    }
+    var maxVerts = Math.max(segCount, 1) * 2;
+    var pos = new Float32Array(maxVerts * 3);
+    skelLineGeom = new THREE.BufferGeometry();
+    skelLineGeom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    var skelMat = new THREE.LineBasicMaterial({ color: 0x5ec8ff, toneMapped: false });
+    skelLineSeg = new THREE.LineSegments(skelLineGeom, skelMat);
+    skelLineSeg.name = "WhmSkelLines";
+    skelLineSeg.renderOrder = 999;
+    root.add(skelLineSeg);
+    skelLineSeg.visible = false;
+  }
+
+  function whmSyncAnimScrubAttrs() {
+    var scrub = document.getElementById("preview-whm-anim-scrub");
+    if (!scrub || !animClips.length) return;
+    var c = animClips[animClipIndex] || animClips[0];
+    var d = getClipDuration(c);
+    scrub.max = String(d);
+  }
+
+  function whmSetAnimPlayButtonPlaying(playing) {
+    var btn = document.getElementById("preview-whm-anim-play");
+    if (!btn) return;
+    btn.textContent = playing ? "⏸" : "▶";
+    btn.setAttribute("aria-pressed", playing ? "true" : "false");
+  }
+
+  function unbindSkelAnimControls() {
+    animPlaying = false;
+    animClips = [];
+    animClipIndex = 0;
+    animTime = 0;
+    animSpeed = 1;
+    animLoop = true;
+    skelArmature = null;
+    skelBoneObjs = null;
+    skelLineGeom = null;
+    skelLineSeg = null;
+    skelData = null;
+    skelHoverRaycaster = null;
+    skelHoverNdc = null;
+    skelHoverTmp = null;
+    _skelVA = null;
+    _skelVB = null;
+    if (canvas && skelPointerMoveHandler) {
+      canvas.removeEventListener("pointermove", skelPointerMoveHandler);
+      skelPointerMoveHandler = null;
+    }
+    var sk = document.getElementById("preview-whm-show-skeleton");
+    if (sk && skelAnimUi.skeletonChange) {
+      sk.removeEventListener("change", skelAnimUi.skeletonChange);
+    }
+    var sel = document.getElementById("preview-whm-anim-select");
+    if (sel && skelAnimUi.animSelectChange) {
+      sel.removeEventListener("change", skelAnimUi.animSelectChange);
+    }
+    var play = document.getElementById("preview-whm-anim-play");
+    if (play && skelAnimUi.animPlayClick) {
+      play.removeEventListener("click", skelAnimUi.animPlayClick);
+    }
+    var scrub = document.getElementById("preview-whm-anim-scrub");
+    if (scrub) {
+      if (skelAnimUi.animScrubInput) scrub.removeEventListener("input", skelAnimUi.animScrubInput);
+      if (skelAnimUi.animScrubPointerDown) scrub.removeEventListener("pointerdown", skelAnimUi.animScrubPointerDown);
+    }
+    var spd = document.getElementById("preview-whm-anim-speed");
+    if (spd && skelAnimUi.animSpeedInput) {
+      spd.removeEventListener("input", skelAnimUi.animSpeedInput);
+    }
+    var lp = document.getElementById("preview-whm-anim-loop");
+    if (lp && skelAnimUi.animLoopChange) {
+      lp.removeEventListener("change", skelAnimUi.animLoopChange);
+    }
+    skelAnimUi = {
+      skeletonChange: null,
+      animSelectChange: null,
+      animPlayClick: null,
+      animScrubInput: null,
+      animScrubPointerDown: null,
+      animSpeedInput: null,
+      animLoopChange: null,
+    };
+    var bar = document.getElementById("preview-whm-anim-bar");
+    if (bar) bar.hidden = true;
+    whmHideBoneTooltip();
+    var skLbl = document.querySelector(".preview-whm-skel-label");
+    if (skLbl) skLbl.hidden = true;
+    if (sk) sk.checked = false;
+  }
+
+  function bindSkelAnimControls(THREE, skelResult, clipList) {
+    skelData = skelResult && skelResult.ok ? skelResult : null;
+    animClips = clipList && clipList.length ? clipList.slice() : [];
+    animClipIndex = 0;
+    animTime = 0;
+    animPlaying = false;
+    animSpeed = 1;
+    animLoop = true;
+    var hasSkel = !!(skelData && skelData.bones && skelData.bones.length);
+    var canAnim = hasSkel && animClips.length > 0;
+    var skLbl = document.querySelector(".preview-whm-skel-label");
+    if (skLbl) {
+      skLbl.setAttribute("data-whm-has-skel", hasSkel ? "1" : "0");
+      skLbl.hidden = !hasSkel;
+      skLbl.setAttribute("aria-hidden", !hasSkel ? "true" : "false");
+    }
+    var bar = document.getElementById("preview-whm-anim-bar");
+    if (bar) {
+      bar.setAttribute("data-whm-has-anim", canAnim ? "1" : "0");
+      bar.hidden = !canAnim;
+      bar.setAttribute("aria-hidden", !canAnim ? "true" : "false");
+    }
+    var skCb = document.getElementById("preview-whm-show-skeleton");
+    if (skCb) skCb.checked = false;
+    var scrub = document.getElementById("preview-whm-anim-scrub");
+    var spdEl = document.getElementById("preview-whm-anim-speed");
+    var lpEl = document.getElementById("preview-whm-anim-loop");
+    if (scrub) {
+      scrub.value = "0";
+      scrub.disabled = !canAnim;
+    }
+    if (spdEl) {
+      spdEl.value = "1";
+      spdEl.disabled = !canAnim;
+    }
+    if (lpEl) {
+      lpEl.checked = true;
+      lpEl.disabled = !canAnim;
+    }
+    whmSetAnimPlayButtonPlaying(false);
+    var playBtn = document.getElementById("preview-whm-anim-play");
+    if (playBtn) playBtn.disabled = !canAnim;
+    var selAnim = document.getElementById("preview-whm-anim-select");
+    if (selAnim) {
+      selAnim.innerHTML = "";
+      selAnim.disabled = !canAnim;
+      var ci;
+      for (ci = 0; ci < animClips.length; ci++) {
+        var opt = document.createElement("option");
+        opt.value = String(ci);
+        opt.textContent = animClips[ci].name || "anim_" + ci;
+        selAnim.appendChild(opt);
+      }
+    }
+    whmSyncAnimScrubAttrs();
+    var frameElInit = document.getElementById("preview-whm-anim-frame");
+    if (frameElInit) {
+      if (canAnim && animClips[animClipIndex] && animClips[animClipIndex].numFrames > 0) {
+        frameElInit.textContent =
+          "1 / " + String(animClips[animClipIndex].numFrames);
+      } else {
+        frameElInit.textContent = "—";
+      }
+    }
+    if (!THREE || !canvas) return;
+    if (hasSkel && skCb) {
+      skelAnimUi.skeletonChange = function () {
+        if (!skelLineSeg) return;
+        skelLineSeg.visible = !!skCb.checked;
+        if (!skCb.checked) whmHideBoneTooltip();
+      };
+      skCb.addEventListener("change", skelAnimUi.skeletonChange);
+    }
+    if (hasSkel && skelBoneObjs && skelBoneObjs.length) {
+      skelPointerMoveHandler = function (e) {
+        if (!skelLineSeg || !skelLineSeg.visible || !skelBoneObjs || !skelData || !camera || !canvas) return;
+        if (dragging) {
+          whmHideBoneTooltip();
+          return;
+        }
+        var TR = getTHREE();
+        if (!TR) return;
+        if (!skelHoverRaycaster) skelHoverRaycaster = new TR.Raycaster();
+        if (!skelHoverNdc) skelHoverNdc = new TR.Vector2();
+        if (!skelHoverTmp) skelHoverTmp = new TR.Vector3();
+        var rect = canvas.getBoundingClientRect();
+        skelHoverNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        skelHoverNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        skelHoverRaycaster.setFromCamera(skelHoverNdc, camera);
+        var best = null;
+        var bestD = Math.max(0.06, camera.position.length() * 0.018);
+        var i;
+        for (i = 0; i < skelBoneObjs.length; i++) {
+          skelBoneObjs[i].getWorldPosition(skelHoverTmp);
+          var d = skelHoverRaycaster.ray.distanceToPoint(skelHoverTmp);
+          if (d < bestD) {
+            bestD = d;
+            best = skelData.bones[i].name;
+          }
+        }
+        var tip = document.getElementById("preview-whm-bone-tooltip");
+        var wrap = document.getElementById("preview-whm-canvas-wrap");
+        if (!tip || !wrap) return;
+        if (best) {
+          tip.textContent = best;
+          tip.hidden = false;
+          var wr = wrap.getBoundingClientRect();
+          tip.style.left =
+            Math.min(Math.max(e.clientX - wr.left - 6, 6), Math.max(6, wr.width - 100)) + "px";
+          tip.style.top =
+            Math.min(Math.max(e.clientY - wr.top + 12, 6), Math.max(6, wr.height - 28)) + "px";
+        } else whmHideBoneTooltip();
+      };
+      canvas.addEventListener("pointermove", skelPointerMoveHandler);
+    }
+    if (!canAnim) return;
+    skelAnimUi.animSelectChange = function () {
+      var v = parseInt(selAnim.value, 10);
+      if (!isFinite(v) || v < 0 || v >= animClips.length) return;
+      animClipIndex = v;
+      animTime = 0;
+      animPlaying = true;
+      turntableEnabled = false;
+      whmSetAnimPlayButtonPlaying(true);
+      if (scrub) scrub.value = "0";
+      whmSyncAnimScrubAttrs();
+    };
+    selAnim.addEventListener("change", skelAnimUi.animSelectChange);
+    skelAnimUi.animPlayClick = function (e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      if (!animClips.length) return;
+      animPlaying = !animPlaying;
+      if (animPlaying) turntableEnabled = false;
+      whmSetAnimPlayButtonPlaying(animPlaying);
+    };
+    playBtn.addEventListener("click", skelAnimUi.animPlayClick);
+    skelAnimUi.animScrubPointerDown = function () {
+      animPlaying = false;
+      whmSetAnimPlayButtonPlaying(false);
+    };
+    scrub.addEventListener("pointerdown", skelAnimUi.animScrubPointerDown);
+    skelAnimUi.animScrubInput = function () {
+      animTime = parseFloat(scrub.value);
+      if (!isFinite(animTime)) animTime = 0;
+    };
+    scrub.addEventListener("input", skelAnimUi.animScrubInput);
+    skelAnimUi.animSpeedInput = function () {
+      animSpeed = parseFloat(spdEl.value);
+      if (!isFinite(animSpeed)) animSpeed = 1;
+    };
+    spdEl.addEventListener("input", skelAnimUi.animSpeedInput);
+    skelAnimUi.animLoopChange = function () {
+      animLoop = !!lpEl.checked;
+    };
+    lpEl.addEventListener("change", skelAnimUi.animLoopChange);
+  }
 
   function buildUvTrianglesByShader(meshes) {
     var map = {};
@@ -434,7 +813,7 @@
     var dist = (sphere.radius / Math.sin(fov / 2)) * margin;
     cam.near = Math.max(0.001, dist / 2000);
     cam.far = dist * 50;
-    cam.position.set(dist * 0.55, dist * 0.35, dist * 0.75);
+    cam.position.set(dist * WHM_DEFAULT_VIEW_DIR_X, dist * WHM_DEFAULT_VIEW_DIR_Y, dist * WHM_DEFAULT_VIEW_DIR_Z);
     cam.lookAt(0, 0, 0);
     if (gmesh) {
       var w = Math.max(box2.max.x - box2.min.x, box2.max.z - box2.min.z, sphere.radius * 2) * 2.2;
@@ -457,22 +836,66 @@
     fitCameraToGroup(THREE, camera, group, groundMesh);
   }
 
+  function rebuildWhmMeshBySourceIndex(root) {
+    whmMeshBySourceIndex = [];
+    if (!root) return;
+    root.traverse(function (o) {
+      if (!o.isMesh || (o.userData && o.userData.isWhmGround)) return;
+      var ix = o.userData && o.userData.whmSourceMeshIndex;
+      if (ix == null || !isFinite(ix)) return;
+      whmMeshBySourceIndex[ix] = o;
+    });
+  }
+
   function setHighlight(THREE, meshIndex) {
     selectedMeshIndex = meshIndex;
     if (!rootGroup) return;
-    rootGroup.children.forEach(function (child, i) {
-      if (!(child instanceof THREE.Mesh)) return;
+    var pick = meshIndex >= 0 ? whmMeshBySourceIndex[meshIndex] : null;
+    rootGroup.traverse(function (child) {
+      if (!child.isMesh || (child.userData && child.userData.isWhmGround)) return;
       var mats = Array.isArray(child.material) ? child.material : [child.material];
       mats.forEach(function (mat) {
         var base = mat.userData.baseColor;
         if (!base) return;
-        if (i === meshIndex && meshIndex >= 0) {
+        if (pick && child === pick) {
           mat.color.copy(base).multiplyScalar(1.38);
         } else {
           mat.color.copy(base);
         }
       });
     });
+  }
+
+  function createMeshRow(THREE, meta, i) {
+    var row = document.createElement("div");
+    row.className = "preview-whm-mesh-row";
+    row.dataset.meshIndex = String(i);
+    var label = document.createElement("label");
+    label.className = "preview-whm-mesh-vis";
+    var vis = document.createElement("input");
+    vis.type = "checkbox";
+    vis.checked = true;
+    vis.setAttribute("data-vis", String(i));
+    vis.addEventListener("change", function () {
+      var m = whmMeshBySourceIndex[i];
+      if (m) m.visible = vis.checked;
+    });
+    label.appendChild(vis);
+    var nameSpan = document.createElement("span");
+    nameSpan.className = "preview-whm-mesh-name";
+    nameSpan.textContent = meta.name;
+    nameSpan.title = meta.name;
+    nameSpan.addEventListener("click", function (e) {
+      e.preventDefault();
+      setHighlight(THREE, selectedMeshIndex === i ? -1 : i);
+    });
+    label.appendChild(nameSpan);
+    var stats = document.createElement("div");
+    stats.className = "preview-whm-mesh-stats";
+    stats.textContent = meta.vertices + " v · " + meta.triangles + " tri";
+    row.appendChild(label);
+    row.appendChild(stats);
+    return row;
   }
 
   function buildSidebar(THREE, sidebarEl, meshMetaList) {
@@ -484,35 +907,7 @@
     }
     sidebarEl.hidden = false;
     meshMetaList.forEach(function (meta, i) {
-      var row = document.createElement("div");
-      row.className = "preview-whm-mesh-row";
-      row.dataset.meshIndex = String(i);
-      var label = document.createElement("label");
-      label.className = "preview-whm-mesh-vis";
-      var vis = document.createElement("input");
-      vis.type = "checkbox";
-      vis.checked = true;
-      vis.setAttribute("data-vis", String(i));
-      vis.addEventListener("change", function () {
-        var m = rootGroup && rootGroup.children[i];
-        if (m) m.visible = vis.checked;
-      });
-      label.appendChild(vis);
-      var nameSpan = document.createElement("span");
-      nameSpan.className = "preview-whm-mesh-name";
-      nameSpan.textContent = meta.name;
-      nameSpan.title = meta.name;
-      nameSpan.addEventListener("click", function (e) {
-        e.preventDefault();
-        setHighlight(THREE, selectedMeshIndex === i ? -1 : i);
-      });
-      label.appendChild(nameSpan);
-      var stats = document.createElement("div");
-      stats.className = "preview-whm-mesh-stats";
-      stats.textContent = meta.vertices + " v · " + meta.triangles + " tri";
-      row.appendChild(label);
-      row.appendChild(stats);
-      sidebarEl.appendChild(row);
+      sidebarEl.appendChild(createMeshRow(THREE, meta, i));
     });
   }
 
@@ -873,8 +1268,16 @@
     if (!renderer || !scene || !camera || !THREE) return;
     rafId = requestAnimationFrame(tick);
     var now = global.performance && performance.now ? performance.now() : Date.now();
-    var dt = lastFrameTime > 0 ? (now - lastFrameTime) / 1000 : 0;
-    lastFrameTime = now;
+    var dt;
+    if (whmPreviewFpsGateLastMs == null) {
+      whmPreviewFpsGateLastMs = now;
+      dt = 1 / WHM_PREVIEW_FPS_CAP;
+    } else {
+      var elapsedMs = now - whmPreviewFpsGateLastMs;
+      if (elapsedMs < WHM_PREVIEW_FRAME_MIN_MS) return;
+      whmPreviewFpsGateLastMs = now;
+      dt = elapsedMs / 1000;
+    }
     if (dt > 0.05) dt = 0.05;
     if (rootGroup && turntableEnabled && !dragging && dt > 0) {
       rotY += dt * turntableRadPerSec;
@@ -883,6 +1286,47 @@
       rootGroup.rotation.y = rotY;
       rootGroup.rotation.x = rotX;
     }
+    var skelAnimActive =
+      skelBoneObjs &&
+      skelData &&
+      typeof global.WHMSkelAnim !== "undefined" &&
+      animClips.length > 0 &&
+      animClipIndex >= 0 &&
+      animClipIndex < animClips.length;
+    if (skelAnimActive) {
+      var clipNow = animClips[animClipIndex];
+      var durClip = getClipDuration(clipNow);
+      if (animPlaying) {
+        var ddt = dt > 0 ? dt : 1 / 60;
+        animTime += ddt * animSpeed;
+        if (animLoop) {
+          animTime = ((animTime % durClip) + durClip) % durClip;
+        } else if (animTime >= durClip) {
+          animTime = durClip;
+          animPlaying = false;
+          whmSetAnimPlayButtonPlaying(false);
+        }
+        var scrubLive = document.getElementById("preview-whm-anim-scrub");
+        if (scrubLive) scrubLive.value = String(animTime);
+      }
+      WHMSkelAnim.applyClip(THREE, clipNow, animTime, animLoop, skelBoneObjs, skelData);
+      var frameEl = document.getElementById("preview-whm-anim-frame");
+      if (frameEl && typeof global.WHMSkelAnim.clipFrameState === "function") {
+        var fs = global.WHMSkelAnim.clipFrameState(clipNow, animTime, animLoop);
+        frameEl.textContent =
+          fs.numFrames > 0 ? String(fs.frameIndex0 + 1) + " / " + String(fs.numFrames) : "—";
+      }
+    } else if (skelBoneObjs && skelData) {
+      whmApplyBindPoseToBones(THREE);
+      var frameElOff = document.getElementById("preview-whm-anim-frame");
+      if (frameElOff) frameElOff.textContent = "—";
+    }
+    if (rootGroup) rootGroup.updateMatrixWorld(true);
+    if (skelArmature) skelArmature.updateMatrixWorld(true);
+    if (whmSharedSkeleton && typeof whmSharedSkeleton.update === "function") {
+      whmSharedSkeleton.update();
+    }
+    updateSkelLines(THREE);
     renderer.render(scene, camera);
     if (viewHelper) {
       viewHelper.render(renderer);
@@ -902,9 +1346,12 @@
   function dispose() {
     stop();
     unbindDisplayModeSelect();
+    unbindSkelAnimControls();
+    whmSharedSkeleton = null;
     turntableEnabled = false;
-    lastFrameTime = 0;
+    whmPreviewFpsGateLastMs = null;
     selectedMeshIndex = -1;
+    whmMeshBySourceIndex = [];
     textureCatalog = [];
     uvTrianglesByShader = {};
     if (sidebarRef) {
@@ -1007,8 +1454,12 @@
    * @param {HTMLCanvasElement} canvasEl
    * @param {HTMLElement | null} sidebarEl
    * @param {function(string): Promise<Uint8Array | null>} [resolveTextureFile] — texture path without .rsh, searched across loaded archives
+   * @param {{
+   *   wheBytes?: Uint8Array | null,
+   *   whmLogicalPath?: string | null,
+   * }} [options]
    */
-  async function load(u8, canvasEl, sidebarEl, resolveTextureFile) {
+  async function load(u8, canvasEl, sidebarEl, resolveTextureFile, options) {
     var THREE = getTHREE();
     if (!THREE || typeof global.WHM === "undefined") {
       return { ok: false, error: "THREE or WHM not loaded" };
@@ -1016,10 +1467,27 @@
     dispose();
     canvas = canvasEl;
     sidebarRef = sidebarEl || null;
+    var opts = options || {};
     var extracted = WHM.extractMeshes(u8);
     if (!extracted.ok) {
       return extracted;
     }
+
+    var skelResult =
+      typeof global.WHMSkelAnim !== "undefined"
+        ? WHMSkelAnim.extractSkeleton(u8, null)
+        : { ok: false, bones: [] };
+    var animFromWhm =
+      typeof global.WHMSkelAnim !== "undefined"
+        ? WHMSkelAnim.extractAnimations(u8, null)
+        : [];
+    var animFromWhe = [];
+    if (opts.wheBytes && opts.wheBytes.byteLength > 0 && typeof global.WHMSkelAnim !== "undefined") {
+      animFromWhe = WHMSkelAnim.extractAnimations(opts.wheBytes, null);
+    }
+    var animClipList = animFromWhm.slice();
+    var mi;
+    for (mi = 0; mi < animFromWhe.length; mi++) animClipList.push(animFromWhe[mi]);
 
     uvTrianglesByShader = buildUvTrianglesByShader(extracted.meshes || []);
 
@@ -1059,11 +1527,28 @@
     fill.position.set(-5, 2, -4);
     scene.add(fill);
 
-    rootGroup = WHM.buildThreeGroup(extracted.meshes, THREE, {
+    rootGroup = new THREE.Group();
+    scene.add(rootGroup);
+
+    if (skelResult.ok && skelResult.bones && skelResult.bones.length) {
+      buildSkeletonVisualization(THREE, rootGroup, skelResult);
+    }
+
+    whmSharedSkeleton = null;
+    if (skelBoneObjs && skelBoneObjs.length) {
+      skelArmature.updateMatrixWorld(true);
+      whmSharedSkeleton = new THREE.Skeleton(skelBoneObjs);
+      whmSharedSkeleton.calculateInverses();
+    }
+
+    WHM.buildThreeGroup(extracted.meshes, THREE, {
       matcapTexture: matcapTexture,
       textureMap: textureMap,
+      appendTo: rootGroup,
+      skeleton: whmSharedSkeleton,
+      skelBones: skelResult.ok && skelResult.bones ? skelResult.bones : null,
     });
-    scene.add(rootGroup);
+    rebuildWhmMeshBySourceIndex(rootGroup);
 
     var groundTex = makeGroundTexture(THREE);
     var groundGeo = new THREE.PlaneGeometry(1, 1);
@@ -1089,16 +1574,20 @@
     rotY = 0.35;
     rotX = 0.15;
     turntableEnabled = true;
-    lastFrameTime = global.performance && performance.now ? performance.now() : Date.now();
 
     var meshMetaList = extracted.meshes.map(function (m) {
       var verts = (m.positions.length / 3) | 0;
       var tris =
         m.triangleCount != null ? m.triangleCount : ((m.indices && m.indices.length) / 3) | 0;
-      return { name: m.name || "mesh", vertices: verts, triangles: tris };
+      return {
+        name: m.name || "mesh",
+        vertices: verts,
+        triangles: tris,
+      };
     });
     buildSidebar(THREE, sidebarRef, meshMetaList);
     bindDisplayModeSelect();
+    bindSkelAnimControls(THREE, skelResult, animClipList);
 
     onResize();
     boundResize = onResize;
