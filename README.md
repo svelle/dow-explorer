@@ -10,9 +10,40 @@ A browser-based explorer for **Dawn of War — Soulstorm** `.sga` archives: fold
 
 <img width="2253" height="1264" alt="image" src="https://github.com/user-attachments/assets/5819e077-6a4e-4bec-a14c-ee6efc7c8a7f" />
 
-
-
 **Live site:** [https://svelle.github.io/dow-explorer/](https://svelle.github.io/dow-explorer/)
+
+
+## Using the app
+
+- **Choose .sga** or **Open .sga** opens the system file picker (or the File System Access API where supported). If picking files fails in a restricted context, the app falls back to a classic file input.
+- **Drag and drop** `.sga` files onto the page.
+
+*You will need to add multiple files to make models load their corresponding textures. Easiest is just to load all .sga files and then remove the _low and _med archives.*
+
+## Preview support
+
+The preview panel picks a viewer by **file extension** (see `js/preview/index.js`).
+
+**Structured / media**
+
+| Extension | Preview |
+| --- | --- |
+| `.whm` | 3D mesh (WebGL / Three.js), materials and animation controls |
+| `.rgd` | Parsed game-data tree |
+| `.wtp` | Team colour texture |
+| `.ucs` | Localization string table |
+| `.whe` | Relic Chunky file tree |
+| `.fda` | Audio (decoded to WAV for the built-in player) |
+| `.rsh` | Shader / embedded texture (DDS path when present) |
+| `.tga`, `.dds` | Decoded image |
+
+**Text**
+
+Readable **UTF-8** with line numbers (large files are truncated): `.lua`, `.scar`, `.events`, `.sgb`, `.ai`, `.nis`, `.teamcolour`, `.rml`, `.txt`, `.md`, `.xml`, `.csv`, `.json`, `.html`, `.glsl`, `.hlsl`, `.cs`, `.cpp`, `.h`. Other files may still open as text if the first bytes look like plain ASCII/UTF-8.
+
+**Fallback**
+
+Everything else shows a **hex** preview (first part of the file). That includes formats you might expect in data archives but that are not decoded yet—for example **`.ogg`**, **`.wav`**, **`.mp3`**, or typical web rasters like **`.png`** / **`.jpg`**.
 
 The UI is bundled with [Bun](https://bun.sh): `[js/three-global.js](js/three-global.js)` → `dist/three-global.js` (sets `globalThis.THREE` from the [`three`](https://www.npmjs.com/package/three) package), and `[js/main.js](js/main.js)` → `dist/main.js`. Legacy parsers and other globals (`SGA`, `TGA`, `DDS`, `WhmPreview`, etc.) stay as separate scripts in `[index.html](index.html)`.
 
@@ -44,45 +75,6 @@ Open [http://127.0.0.1:8080/](http://127.0.0.1:8080/). The dev command runs init
 
 
 After a fresh clone, `dist/` may be missing until you run `bun dev` or `bun run build`. `index.html` loads `dist/three-global.js` (Three.js) before `whm-preview.js`, then `dist/main.js`.
-
-## GitHub Pages
-
-The workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) builds with Bun and deploys the static site.
-
-**One-time setup:** In the repo on GitHub, open **Settings → Pages → Build and deployment**, set **Source** to **GitHub Actions**, and save. If Source stays on “Deploy from a branch” or is unset, the deploy step fails with **404 / Failed to create deployment**. After switching to GitHub Actions, re-run the failed workflow (or push a commit).
-
-Private repos may need a paid plan for Pages; see GitHub’s docs.
-
-## Using the app
-
-- **Choose .sga** or **Open .sga** opens the system file picker (or the File System Access API where supported). If picking files fails in a restricted context, the app falls back to a classic file input.
-- **Drag and drop** `.sga` files onto the page.
-- **Recent files** — Reopen works when (a) Chromium has a saved **file handle** for the entry, or (b) the entry has an absolute path and your environment serves **`GET /api/read-sga?path=…`**. Embedded or IDE-built-in browsers often block handle access; use a normal **Chrome** or **Edge** window, or pick the file again with **Choose .sga**. Failures show a **dismissible banner** at the top of the page (not only a system dialog).
-
-## Preview support
-
-The preview panel picks a viewer by **file extension** (see `js/preview/index.js`).
-
-**Structured / media**
-
-| Extension | Preview |
-| --- | --- |
-| `.whm` | 3D mesh (WebGL / Three.js), materials and animation controls |
-| `.rgd` | Parsed game-data tree |
-| `.wtp` | Team colour texture |
-| `.ucs` | Localization string table |
-| `.whe` | Relic Chunky file tree |
-| `.fda` | Audio (decoded to WAV for the built-in player) |
-| `.rsh` | Shader / embedded texture (DDS path when present) |
-| `.tga`, `.dds` | Decoded image |
-
-**Text**
-
-Readable **UTF-8** with line numbers (large files are truncated): `.lua`, `.scar`, `.events`, `.sgb`, `.ai`, `.nis`, `.teamcolour`, `.rml`, `.txt`, `.md`, `.xml`, `.csv`, `.json`, `.html`, `.glsl`, `.hlsl`, `.cs`, `.cpp`, `.h`. Other files may still open as text if the first bytes look like plain ASCII/UTF-8.
-
-**Fallback**
-
-Everything else shows a **hex** preview (first part of the file). That includes formats you might expect in data archives but that are not decoded yet—for example **`.ogg`**, **`.wav`**, **`.mp3`**, or typical web rasters like **`.png`** / **`.jpg`**.
 
 ## Project layout
 
