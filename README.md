@@ -33,6 +33,16 @@ Open [http://127.0.0.1:8080/](http://127.0.0.1:8080/). The dev command runs init
 
 After a fresh clone, `dist/` may be missing until you run `bun dev` or `bun run build`. `index.html` loads `dist/three-global.js` (Three.js) before `whm-preview.js`, then `dist/main.js`.
 
+## GitHub Pages
+
+The workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) builds with Bun and deploys the static site.
+
+**Live site:** [https://svelle.github.io/dow-explorer/](https://svelle.github.io/dow-explorer/)
+
+**One-time setup:** In the repo on GitHub, open **Settings → Pages → Build and deployment**, set **Source** to **GitHub Actions**, and save. If Source stays on “Deploy from a branch” or is unset, the deploy step fails with **404 / Failed to create deployment**. After switching to GitHub Actions, re-run the failed workflow (or push a commit).
+
+Private repos may need a paid plan for Pages; see GitHub’s docs.
+
 ## Using the app
 
 - **Choose .sga** or **Open .sga** opens the system file picker (or the File System Access API where supported). If picking files fails in a restricted context, the app falls back to a classic file input.
