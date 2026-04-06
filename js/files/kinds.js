@@ -15,10 +15,14 @@ export function getFileKindInfo(filename) {
     tga: { label: "TGA", kind: "Texture (Targa)" },
     dds: { label: "DDS", kind: "Texture (DirectDraw)" },
     rsh: { label: "RSH", kind: "Shader / texture (Relic Chunky)" },
+    wtp: { label: "WTP", kind: "Team colour texture (Relic Chunky)" },
+    ucs: { label: "UCS", kind: "Localization strings (UTF-16)" },
     ptx: { label: "PTX", kind: "Texture" },
     rtm: { label: "RTM", kind: "Animation" },
     whm: { label: "WHM", kind: "Mesh (Relic WHM)" },
-    whe: { label: "WHE", kind: "WHE data" },
+    whe: { label: "WHE", kind: "Animation / motion (Chunky)" },
+    sgb: { label: "SGB", kind: "Map / scenario (Chunky)" },
+    events: { label: "EVENTS", kind: "Events script" },
     fx: { label: "FX", kind: "Effects" },
     ogg: { label: "OGG", kind: "Audio (Vorbis)" },
     wav: { label: "WAV", kind: "Audio (PCM)" },
@@ -73,6 +77,20 @@ export function extSupportsLazyGridThumb(ext) {
   if (ext === "dds") return typeof DDS !== "undefined";
   if (ext === "rsh") {
     return typeof RSH !== "undefined" && typeof DDS !== "undefined" && typeof Chunky !== "undefined";
+  }
+  if (ext === "wtp") {
+    return (
+      typeof WTP !== "undefined" &&
+      typeof WTP.renderGridThumbnail === "function" &&
+      typeof Chunky !== "undefined"
+    );
+  }
+  if (ext === "rgd") {
+    return (
+      typeof RGD !== "undefined" &&
+      typeof RGD.renderThumbCanvas === "function" &&
+      typeof Chunky !== "undefined"
+    );
   }
   if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico"].indexOf(ext) >= 0) return true;
   return false;

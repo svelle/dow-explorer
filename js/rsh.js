@@ -260,9 +260,74 @@
     };
   }
 
+  function formatCodeLabel(fmt) {
+    if (fmt === IMG_FMT_DXT1) return "DXT1";
+    if (fmt === IMG_FMT_DXT3) return "DXT3";
+    if (fmt === IMG_FMT_DXT5) return "DXT5";
+    if (fmt === IMG_FMT_TGA_0 || fmt === IMG_FMT_TGA_1 || fmt === IMG_FMT_TGA_2) return "TGA (fmt " + fmt + ")";
+    return String(fmt);
+  }
+
+  function walkFoldSummary(u8, start, end, out) {
+    Chunky.forEachChunk(u8, start, end, function (h, body) {
+      var tid = typeidKey(h.typeid);
+      if (tid === "DATAHEAD" && body.length >= 8) {
+        var dv = new DataView(body.buffer, body.byteOffset, body.byteLength);
+        out.dataHeadImageType = dv.getInt32(0, true);
+        out.dataHeadNumImages = dv.getInt32(4, true);
+      }
+      if (tid.indexOf("FOLD") === 0) walkFoldSummary(body, 0, body.length, out);
+    });
+  }
+
+  function ddsHeaderDims(dds) {
+    if (!dds || dds.length < 32) return null;
+    var dv = new DataView(dds.buffer, dds.byteOffset, Math.min(dds.byteLength, 32));
+    if (dv.getUint32(0, true) !== DDS_MAGIC_LE) return null;
+    var height = dv.getUint32(12, true);
+    var width = dv.getUint32(16, true);
+    if (!width || !height || width > 8192 || height > 8192) return null;
+    return { width: width, height: height };
+  }
+
+  /**
+   * Human-readable lines for preview chrome (DATAHEAD + texture dimensions / format).
+   * @param {Uint8Array} u8
+   * @returns {string[]}
+   */
+  function getPreviewTextureInfoLines(u8) {
+    if (!u8 || typeof Chunky === "undefined") return [];
+    var off =
+      typeof Chunky.getFirstChunkOffset === "function" ? Chunky.getFirstChunkOffset(u8) : 28;
+    if (off < 0) off = 24;
+    var out = {};
+    walkFoldSummary(u8, off, u8.length, out);
+    var lines = [];
+    if (out.dataHeadImageType !== undefined) {
+      lines.push("HEAD: image_type=" + out.dataHeadImageType + ", num_images=" + out.dataHeadNumImages);
+    }
+    var pair = tryImagPair(u8);
+    if (pair) {
+      var meta = parseDataAttr(pair.attr);
+      if (meta) {
+        lines.push(
+          "Texture: " + meta.width + "×" + meta.height + " · " + formatCodeLabel(meta.format) + " · mips " + meta.mips
+        );
+      }
+    }
+    var hasTexLine = lines.some(function (l) { return l.indexOf("Texture:") === 0; });
+    var emb = tryEmbeddedDds(u8);
+    if (emb && !hasTexLine) {
+      var sm = ddsHeaderDims(emb);
+      if (sm) lines.push("Embedded DDS: " + sm.width + "×" + sm.height);
+    }
+    return lines;
+  }
+
   global.RSH = {
     extractDdsBytes: extractDdsBytes,
     extractTgaBytes: extractTgaBytes,
     decodePreviewToCanvas: decodePreviewToCanvas,
+    getPreviewTextureInfoLines: getPreviewTextureInfoLines,
   };
 })(typeof window !== "undefined" ? window : globalThis);

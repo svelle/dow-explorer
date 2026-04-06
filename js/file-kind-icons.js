@@ -34,18 +34,20 @@
   function getContentKindFromExt(ext) {
     ext = (ext || "").toLowerCase();
     if (!ext) return "binary";
-    if (["tga", "dds", "rsh", "ptx", "png", "jpg", "jpeg", "gif", "bmp", "webp"].indexOf(ext) >= 0) {
+    if (["tga", "dds", "rsh", "wtp", "ptx", "png", "jpg", "jpeg", "gif", "bmp", "webp"].indexOf(ext) >= 0) {
       return "image";
     }
     if (["wav", "ogg", "mp3", "fda"].indexOf(ext) >= 0) return "audio";
     if (["mp4", "bik", "avi", "webm"].indexOf(ext) >= 0) return "video";
     if (ext === "xls" || ext === "xlsx") return "spreadsheet";
+    if (ext === "rgd") return "spreadsheet";
     if (["whm", "fbx", "obj"].indexOf(ext) >= 0) return "model3d";
     if (
       [
         "lua",
         "scar",
         "events",
+        "sgb",
         "ai",
         "nis",
         "teamcolour",

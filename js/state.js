@@ -9,6 +9,7 @@ export var state = {
   expanded: new Set(),
   cachedPreview: null,
   previewImageObjectUrl: null,
+  previewStructuredObjectUrls: [],
   previewAudioObjectUrl: null,
   previewAudioSeekDragging: false,
   gridThumbObserver: null,

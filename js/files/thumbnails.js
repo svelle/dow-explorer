@@ -243,6 +243,36 @@ export function loadGridThumbnailForPreview(previewEl) {
         });
       }
 
+      if (ext === "wtp" && typeof WTP !== "undefined" && typeof WTP.renderGridThumbnail === "function") {
+        var wtpCan = WTP.renderGridThumbnail(data);
+        if (!wtpCan) throw new Error("wtp thumb");
+        return new Promise(function (resolve) {
+          thumbCanvasToBlob(wtpCan, 256, function (blob) {
+            if (!previewEl.isConnected) {
+              resolve();
+              return;
+            }
+            finishWithBlob(blob);
+            resolve();
+          });
+        });
+      }
+
+      if (ext === "rgd" && typeof RGD !== "undefined" && typeof RGD.renderThumbCanvas === "function") {
+        var rgdCan = RGD.renderThumbCanvas(data);
+        if (!rgdCan) throw new Error("rgd thumb");
+        return new Promise(function (resolve) {
+          thumbCanvasToBlob(rgdCan, 256, function (blob) {
+            if (!previewEl.isConnected) {
+              resolve();
+              return;
+            }
+            finishWithBlob(blob);
+            resolve();
+          });
+        });
+      }
+
       var mime = mimeForRasterExt(ext);
       if (!mime) throw new Error("unsupported");
       finishWithBlob(new Blob([data], { type: mime }));

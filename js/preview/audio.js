@@ -2,6 +2,7 @@
 
 import { state } from "../state.js";
 import { $ } from "../util.js";
+import { resetAuxiliaryPreviewDom } from "./dom-reset.js";
 
 function formatPreviewTime(sec) {
   if (!isFinite(sec) || sec < 0) sec = 0;
@@ -66,6 +67,7 @@ export function disposeAudioUi() {
 }
 
 export function applyPreviewAudioFromBlob(blob, displayName) {
+  resetAuxiliaryPreviewDom();
   var wrap = $("preview-text-wrap");
   var pre = $("preview-content");
   var img = $("preview-image");

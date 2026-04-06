@@ -213,9 +213,9 @@ export function renderMain() {
 
     preview.appendChild(badge);
 
-    var lazyWhm = (kind.ext || "").toLowerCase() === "whm" && extSupportsLazyWhmGridThumb();
-    var lazyThumb =
-      (contentKind === "image" && extSupportsLazyGridThumb(kind.ext || "")) || lazyWhm;
+    var extLower = (kind.ext || "").toLowerCase();
+    var lazyWhm = extLower === "whm" && extSupportsLazyWhmGridThumb();
+    var lazyThumb = extSupportsLazyGridThumb(extLower) || lazyWhm;
     if (lazyThumb) {
       preview.classList.add("file-card-preview--has-thumb");
       preview.dataset.lazyThumb = "1";

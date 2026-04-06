@@ -163,7 +163,60 @@
             <div id="preview-line-gutter" class="preview-line-gutter" aria-hidden="true" hidden></div>
             <pre id="preview-content" class="preview-pre">Select a file</pre>
           </div>
-          <img id="preview-image" class="preview-image" alt="" hidden />
+          <div id="preview-raster-wrap" class="preview-raster-wrap" hidden>
+            <div id="preview-raster-meta" class="preview-raster-meta" hidden></div>
+            <div class="preview-raster-checker">
+              <img id="preview-image" class="preview-image" alt="" hidden />
+            </div>
+          </div>
+          <div id="preview-rgd-wrap" class="preview-rgd-wrap" hidden>
+            <div class="preview-rgd-toolbar">
+              <input
+                type="search"
+                id="preview-rgd-search"
+                class="preview-rgd-search tree-filter-input"
+                placeholder="Filter keys / values…"
+                aria-label="Filter RGD attributes"
+              />
+            </div>
+            <div id="preview-rgd-tree" class="preview-rgd-tree"></div>
+          </div>
+          <div id="preview-wtp-wrap" class="preview-wtp-wrap" hidden>
+            <div id="preview-wtp-grid" class="preview-wtp-grid"></div>
+          </div>
+          <div id="preview-ucs-wrap" class="preview-ucs-wrap" hidden>
+            <input
+              type="search"
+              id="preview-ucs-search"
+              class="preview-ucs-search tree-filter-input"
+              placeholder="Filter by id or text…"
+              aria-label="Filter localization strings"
+            />
+            <div class="preview-ucs-scroll">
+              <table class="preview-ucs-table" id="preview-ucs-table">
+                <thead>
+                  <tr>
+                    <th class="preview-ucs-th-id">ID</th>
+                    <th>String</th>
+                  </tr>
+                </thead>
+                <tbody id="preview-ucs-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="preview-chunky-wrap" class="preview-chunky-wrap" hidden>
+            <div id="preview-chunky-preamble" class="preview-chunky-preamble" hidden></div>
+            <div class="preview-chunky-toolbar">
+              <input
+                type="search"
+                id="preview-chunky-search"
+                class="preview-chunky-search tree-filter-input"
+                placeholder="Filter chunks / embedded text…"
+                aria-label="Filter Chunky tree"
+              />
+            </div>
+            <div id="preview-chunky-tree" class="preview-chunky-tree"></div>
+          </div>
           <div id="preview-whm-wrap" class="preview-whm-wrap" hidden>
             <div class="preview-whm-inner">
               <button
@@ -290,7 +343,11 @@
   <script defer src="js/dds.js"></script>
   <script defer src="js/fda.js"></script>
   <script defer src="js/chunky.js"></script>
+  <script defer src="js/relic-chunky-tree.js"></script>
   <script defer src="js/rsh.js"></script>
+  <script defer src="js/rgd.js"></script>
+  <script defer src="js/wtp.js"></script>
+  <script defer src="js/ucs.js"></script>
   <script defer src="js/whm.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script defer src="js/whm-preview.js"></script>

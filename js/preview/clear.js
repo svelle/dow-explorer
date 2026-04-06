@@ -5,12 +5,14 @@ import { $ } from "../util.js";
 import { disposeAudioUi } from "./audio.js";
 import { disposeImageUi } from "./image.js";
 import { disposeWhm, hidePreviewWhmWrap } from "./whm.js";
+import { resetAuxiliaryPreviewDom } from "./dom-reset.js";
 
 export function clearPreview() {
   disposeImageUi();
   disposeAudioUi();
   disposeWhm();
   hidePreviewWhmWrap();
+  resetAuxiliaryPreviewDom();
 
   var wrap = $("preview-text-wrap");
   var gutter = $("preview-line-gutter");

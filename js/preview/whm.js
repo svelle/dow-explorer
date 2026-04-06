@@ -4,6 +4,7 @@ import { state } from "../state.js";
 import { $ } from "../util.js";
 import { disposeAudioUi } from "./audio.js";
 import { disposeImageUi } from "./image.js";
+import { resetAuxiliaryPreviewDom } from "./dom-reset.js";
 
 var whmTextureResizeObserver = null;
 var whmModeIsTexture = false;
@@ -501,6 +502,7 @@ export function setPreviewWhm(u8, fileName) {
   }
   disposeImageUi();
   disposeAudioUi();
+  resetAuxiliaryPreviewDom();
   disposeWhm();
   hidePreviewWhmWrap();
   var aud = $("preview-audio");
