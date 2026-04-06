@@ -2,6 +2,8 @@
 
 A browser-based explorer for **Dawn of War — Soulstorm** `.sga` archives: folder tree, file list, previews (textures, audio, WHM mesh, hex/text), and optional ZIP export of a folder.
 
+**Live site:** [https://svelle.github.io/dow-explorer/](https://svelle.github.io/dow-explorer/)
+
 The UI is bundled with [Bun](https://bun.sh): `[js/three-global.js](js/three-global.js)` → `dist/three-global.js` (sets `globalThis.THREE` from the [`three`](https://www.npmjs.com/package/three) package), and `[js/main.js](js/main.js)` → `dist/main.js`. Legacy parsers and other globals (`SGA`, `TGA`, `DDS`, `WhmPreview`, etc.) stay as separate scripts in `[index.html](index.html)`.
 
 ## Requirements
@@ -36,8 +38,6 @@ After a fresh clone, `dist/` may be missing until you run `bun dev` or `bun run 
 ## GitHub Pages
 
 The workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) builds with Bun and deploys the static site.
-
-**Live site:** [https://svelle.github.io/dow-explorer/](https://svelle.github.io/dow-explorer/)
 
 **One-time setup:** In the repo on GitHub, open **Settings → Pages → Build and deployment**, set **Source** to **GitHub Actions**, and save. If Source stays on “Deploy from a branch” or is unset, the deploy step fails with **404 / Failed to create deployment**. After switching to GitHub Actions, re-run the failed workflow (or push a commit).
 
