@@ -726,15 +726,21 @@ body.sidebar-resizing * {
   list-style: none;
   margin: 0;
   padding: 0.25rem 0;
-  max-height: 140px;
-  overflow-y: auto;
+  flex-shrink: 0;
 }
 
-.archive-list li button {
+.archive-list li {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.archive-list .archive-select-btn {
   display: block;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   text-align: left;
-  padding: 0.4rem 0.75rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.75rem;
   border: none;
   background: transparent;
   color: var(--text);
@@ -742,15 +748,40 @@ body.sidebar-resizing * {
   font-family: var(--font-mono);
   cursor: pointer;
   border-left: 3px solid transparent;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.archive-list li button:hover {
+.archive-list .archive-select-btn:hover {
   background: var(--bg-elevated);
 }
 
-.archive-list li button.active {
+.archive-list .archive-select-btn.active {
   background: var(--bg-elevated);
   border-left-color: var(--accent);
+}
+
+.archive-list .archive-unload-btn {
+  flex-shrink: 0;
+  width: 2rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.archive-list .archive-unload-btn:hover {
+  background: color-mix(in srgb, var(--error, #c62828) 12%, var(--bg-elevated));
+  color: var(--error, #c62828);
+}
+
+.archive-list .archive-unload-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .tree-container {
