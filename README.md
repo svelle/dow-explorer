@@ -2,6 +2,8 @@
 
 A browser-based explorer for **Dawn of War — Soulstorm** `.sga` archives: folder tree, file list, previews (textures, audio, WHM mesh, hex/text), and optional ZIP export of a folder.
 
+<img width="2253" height="1267" alt="image" src="https://github.com/user-attachments/assets/49b5c99d-78fb-44b0-b0c2-42475b3372bd" />
+
 **Live site:** [https://svelle.github.io/dow-explorer/](https://svelle.github.io/dow-explorer/)
 
 The UI is bundled with [Bun](https://bun.sh): `[js/three-global.js](js/three-global.js)` → `dist/three-global.js` (sets `globalThis.THREE` from the [`three`](https://www.npmjs.com/package/three) package), and `[js/main.js](js/main.js)` → `dist/main.js`. Legacy parsers and other globals (`SGA`, `TGA`, `DDS`, `WhmPreview`, etc.) stay as separate scripts in `[index.html](index.html)`.
