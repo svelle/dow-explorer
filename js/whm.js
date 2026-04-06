@@ -394,27 +394,172 @@
   }
 
   /**
-   * FOLDMSLC may live under FOLDMSGR or deeper nesting; recurse into every FOLD* chunk.
+   * FOLDMSGR → DATADATA **version 1** (blender_dow CH_DATADATA): mesh xref list only — no vertices in chunk.
+   * Each row: Length-prefixed name, length-prefixed Relic path, int32 parent bone index (not a -1 row terminator).
+   * Empty path ⇒ geometry comes from a sibling FOLDMSLC with matching name.
+   * @returns {{ entries: { meshName: string, resourcePath: string, parentIdx: number }[], consumed: number } | null}
+   */
+  function parseMsgrMeshListDatadata(u8) {
+    if (!u8 || u8.length < 4) return null;
+    var dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    var n = dv.getInt32(0, true);
+    if (n < 0 || n > 2048) return null;
+    var off = 4;
+    var entries = [];
+    var i;
+    for (i = 0; i < n; i++) {
+      var bn = readStr(dv, u8, off);
+      off = bn.o;
+      if (off > u8.byteLength) return null;
+      var bp = readStr(dv, u8, off);
+      off = bp.o;
+      if (off + 4 > u8.byteLength) return null;
+      var parentIdx = dv.getInt32(off, true);
+      off += 4;
+      entries.push({
+        meshName: (bn.s || "").replace(/\0/g, "").trim() || "piece",
+        resourcePath: (bp.s || "").replace(/\0/g, "").trim(),
+        parentIdx: parentIdx,
+      });
+    }
+    if (off > u8.byteLength) return null;
+    return { entries: entries, consumed: off };
+  }
+
+  /**
+   * Alternate LOD / piece table: N × (nameLen, name, pathLen, path, -1 terminator).
+   * @returns {{ entries: { meshName: string, resourcePath: string }[], consumed: number } | null}
+   */
+  function parseMsgrLodDescriptorTable(u8) {
+    if (!u8 || u8.length < 20) return null;
+    var dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    var n = dv.getInt32(0, true);
+    if (n < 1 || n > 128) return null;
+    var off = 4;
+    var entries = [];
+    var i;
+    for (i = 0; i < n; i++) {
+      if (off + 4 > u8.length) return null;
+      var nameLen = dv.getInt32(off, true);
+      off += 4;
+      if (nameLen < 0 || nameLen > 4096 || off + nameLen > u8.length) return null;
+      var meshName = UTF8.decode(u8.subarray(off, off + nameLen)).replace(/\0/g, "").trim();
+      off += nameLen;
+      if (off + 4 > u8.length) return null;
+      var pathLen = dv.getInt32(off, true);
+      off += 4;
+      if (pathLen < 0 || pathLen > 8192 || off + pathLen > u8.length) return null;
+      var resourcePath = UTF8.decode(u8.subarray(off, off + pathLen)).replace(/\0/g, "").trim();
+      off += pathLen;
+      if (off + 4 > u8.length) return null;
+      var term = dv.getInt32(off, true);
+      off += 4;
+      if (term !== -1) return null;
+      if (resourcePath) entries.push({ meshName: meshName || "piece", resourcePath: resourcePath });
+    }
+    return { entries: entries, consumed: off };
+  }
+
+  /**
+   * Some FOLDMSGR files use a leading "combined mesh" table: N × (nameLen, name, pathLen, path, -1).
+   * If the chunk is only that table, there is no embedded geometry (references base_mesh paths).
+   * If bytes remain after the table, the standard DATADATA mesh blob follows.
+   * @returns {{ payloadStart: number, descriptorOnly: boolean, entries?: { meshName: string, resourcePath: string }[] }}
+   */
+  function peelMsgrCombinedDatadataPreamble(u8) {
+    var empty = { payloadStart: 0, descriptorOnly: false };
+    var parsed = parseMsgrLodDescriptorTable(u8);
+    if (!parsed) return empty;
+    var common = { entries: parsed.entries };
+    if (parsed.consumed >= u8.length) {
+      return Object.assign(common, {
+        payloadStart: u8.length,
+        descriptorOnly: true,
+      });
+    }
+    return Object.assign(common, {
+      payloadStart: parsed.consumed,
+      descriptorOnly: false,
+    });
+  }
+
+  function tryParseDatadataBody(body2, h2, fallbackChunkName, out, extractState, allowMsgrLodPeel) {
+    var sliceLabel =
+      (h2.name || "").replace(/\0/g, "").trim() || fallbackChunkName || "mesh";
+    var chunkVersion = typeof h2.version === "number" ? h2.version : -1;
+
+    /* Official DoW WHM: FOLDMSGR → DATADATA v1 is xref list; v2 lives under FOLDMSLC for real meshes. */
+    if (allowMsgrLodPeel && chunkVersion === 1) {
+      var meshList = parseMsgrMeshListDatadata(body2);
+      if (meshList && meshList.entries) {
+        extractState.descriptorOnlyMsgrDatadata = true;
+        var li;
+        for (li = 0; li < meshList.entries.length; li++) {
+          var row = meshList.entries[li];
+          if (row.resourcePath) {
+            extractState.referenceEntries.push({
+              meshName: row.meshName,
+              resourcePath: row.resourcePath,
+            });
+          }
+        }
+      }
+      return;
+    }
+
+    var peel = { payloadStart: 0, descriptorOnly: false };
+    if (allowMsgrLodPeel) peel = peelMsgrCombinedDatadataPreamble(body2);
+    if (peel.entries && peel.entries.length) {
+      var ri;
+      for (ri = 0; ri < peel.entries.length; ri++) {
+        extractState.referenceEntries.push(peel.entries[ri]);
+      }
+    }
+    if (peel.descriptorOnly) {
+      extractState.descriptorOnlyMsgrDatadata = true;
+      return;
+    }
+    var payload = peel.payloadStart > 0 ? body2.subarray(peel.payloadStart) : body2;
+    var parsed = parseMeshSliceDatadata(payload, sliceLabel);
+    if (parsed && parsed.ok && meshGeometryOk(parsed)) {
+      out.push(parsed);
+    }
+  }
+
+  /**
+   * Mesh under FOLDRSGM: FOLDMSLC → DATADATA, and/or FOLDMSGR (multi-slice or single DATADATA).
+   * FOLDANIM/DATADATA is never under MSGR/MSLC-only walk from RSGM top level in a way we recurse into.
    * @param {Uint8Array} folderU8
    * @param {object[]} out
    */
-  function walkFoldMslcRecursive(folderU8, out) {
+  function walkFoldMslcRecursive(folderU8, out, extractState) {
     Chunky.forEachChunk(folderU8, 0, folderU8.length, function (h, body) {
       var tid = typeidKey(h.typeid);
       var chunkName = (h.name || "").replace(/\0/g, "").trim();
       if (tid === "FOLDMSLC") {
         Chunky.forEachChunk(body, 0, body.length, function (h2, body2) {
           if (typeidKey(h2.typeid) === "DATADATA") {
-            var sliceLabel =
-              (h2.name || "").replace(/\0/g, "").trim() || chunkName || "mesh";
-            var parsed = parseMeshSliceDatadata(body2, sliceLabel);
-            if (parsed && parsed.ok && meshGeometryOk(parsed)) {
-              out.push(parsed);
-            }
+            tryParseDatadataBody(body2, h2, chunkName, out, extractState, false);
+          }
+        });
+      } else if (tid === "FOLDMSGR") {
+        Chunky.forEachChunk(body, 0, body.length, function (h2, body2) {
+          var t2 = typeidKey(h2.typeid);
+          if (t2 === "DATADATA") {
+            tryParseDatadataBody(body2, h2, chunkName, out, extractState, true);
+          } else if (t2 === "FOLDMSLC") {
+            var mslcSliceName = (h2.name || "").replace(/\0/g, "").trim();
+            Chunky.forEachChunk(body2, 0, body2.length, function (h3, body3) {
+              if (typeidKey(h3.typeid) === "DATADATA") {
+                tryParseDatadataBody(body3, h3, mslcSliceName, out, extractState, false);
+              }
+            });
+          } else if (t2.indexOf("FOLD") === 0) {
+            walkFoldMslcRecursive(body2, out, extractState);
           }
         });
       } else if (tid.indexOf("FOLD") === 0) {
-        walkFoldMslcRecursive(body, out);
+        walkFoldMslcRecursive(body, out, extractState);
       }
     });
   }
@@ -492,9 +637,26 @@
     }
 
     var meshes = [];
-    walkFoldMslcRecursive(rsgmBody, meshes);
+    var extractState = { descriptorOnlyMsgrDatadata: false, referenceEntries: [] };
+    walkFoldMslcRecursive(rsgmBody, meshes, extractState);
 
     if (meshes.length === 0) {
+      if (extractState.descriptorOnlyMsgrDatadata && extractState.referenceEntries.length) {
+        return {
+          ok: false,
+          referenceOnly: true,
+          referenceEntries: extractState.referenceEntries.slice(),
+          error:
+            "This WHM lists mesh pieces that reference other WHM files (no embedded vertices). Load referenced models from the archive when available.",
+        };
+      }
+      if (extractState.descriptorOnlyMsgrDatadata) {
+        return {
+          ok: false,
+          error:
+            "This WHM only lists mesh pieces (paths under FOLDMSGR) and does not embed vertices in the file. Geometry is loaded from referenced assets (e.g. base_mesh). Use a WHM with full FOLDMSLC/DATADATA geometry or open the shared mesh source from the archive.",
+        };
+      }
       return {
         ok: false,
         error:
@@ -652,5 +814,7 @@
     parseMeshSliceDatadata: parseMeshSliceDatadata,
     extractShaderMapFromRsgm: extractShaderMapFromRsgm,
     findRsgmFolderBody: findRsgmFolderBody,
+    parseMsgrLodDescriptorTable: parseMsgrLodDescriptorTable,
+    parseMsgrMeshListDatadata: parseMsgrMeshListDatadata,
   };
 })(typeof window !== "undefined" ? window : globalThis);

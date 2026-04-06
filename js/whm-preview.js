@@ -1166,6 +1166,184 @@
     });
   }
 
+  function normalizeReferencedWhmPathNoExt(p) {
+    var s = String(p || "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .trim();
+    if (!s) return "";
+    return s.replace(/\.whm$/i, "");
+  }
+
+  /** Same normalization as path keys for skipping self-references (primary archive path). */
+  function normalizeWhmPathKeyLower(path) {
+    return normalizeReferencedWhmPathNoExt(path).toLowerCase();
+  }
+
+  /**
+   * @param {{ meshName: string, resourcePath: string }[]} referenceEntries
+   * @param {function(string): Promise<Uint8Array | null>} resolveReferencedWhm
+   * @param {string} [skipPathKeyLower] — skip refs matching this key (e.g. primary .whm path)
+   * @returns {Promise<{ meshes: object[], mergedShader: Record<string, string> }>}
+   */
+  async function appendMeshesFromReferencedWhmPaths(
+    referenceEntries,
+    resolveReferencedWhm,
+    skipPathKeyLower
+  ) {
+    var mergedMeshes = [];
+    var mergedShader = {};
+    var rowSeen = Object.create(null);
+    var skip = skipPathKeyLower || "";
+    var ri;
+    for (ri = 0; ri < referenceEntries.length; ri++) {
+      var entry = referenceEntries[ri];
+      var p = normalizeReferencedWhmPathNoExt(entry.resourcePath);
+      if (!p) continue;
+      var pk = p.toLowerCase();
+      var wantSlice = (entry.meshName || "").trim().toLowerCase();
+      var rowKey = pk + "\x1e" + wantSlice;
+      if (rowSeen[rowKey]) continue;
+      rowSeen[rowKey] = true;
+      if (skip && pk === skip) continue;
+      var refU8;
+      try {
+        refU8 = await resolveReferencedWhm(p);
+      } catch (e) {
+        refU8 = null;
+      }
+      if (!refU8 || !refU8.byteLength) continue;
+      var sub = WHM.extractMeshes(refU8);
+      if (!sub.ok || !sub.meshes || !sub.meshes.length) continue;
+      var pathTag = p.replace(/^.*\//, "") || "ref";
+      var candidates = sub.meshes;
+      if (wantSlice) {
+        var filtered = [];
+        var fi;
+        for (fi = 0; fi < sub.meshes.length; fi++) {
+          if ((sub.meshes[fi].name || "").toLowerCase() === wantSlice) {
+            filtered.push(sub.meshes[fi]);
+          }
+        }
+        if (!filtered.length) {
+          continue;
+        }
+        candidates = filtered;
+      }
+      var mi;
+      for (mi = 0; mi < candidates.length; mi++) {
+        var sm = candidates[mi];
+        mergedMeshes.push(
+          Object.assign({}, sm, {
+            name: pathTag + " · " + (sm.name || "mesh_" + mi),
+          })
+        );
+      }
+      if (sub.shaderMap) {
+        var k;
+        for (k in sub.shaderMap) {
+          if (Object.prototype.hasOwnProperty.call(sub.shaderMap, k)) {
+            mergedShader[k] = sub.shaderMap[k];
+          }
+        }
+      }
+    }
+    return { meshes: mergedMeshes, mergedShader: mergedShader };
+  }
+
+  /** Overlay `primary` shader paths over `fromRefs` (unit WHM wins for duplicate keys). */
+  function mergeShaderMapPrimaryWins(primary, fromRefs) {
+    var out = {};
+    var k;
+    if (fromRefs) {
+      for (k in fromRefs) {
+        if (Object.prototype.hasOwnProperty.call(fromRefs, k)) out[k] = fromRefs[k];
+      }
+    }
+    if (primary) {
+      for (k in primary) {
+        if (Object.prototype.hasOwnProperty.call(primary, k)) out[k] = primary[k];
+      }
+    }
+    return out;
+  }
+
+  function getPrimaryShaderMapFromWhmBytes(u8) {
+    if (
+      !u8 ||
+      typeof global.Chunky === "undefined" ||
+      typeof global.WHM === "undefined" ||
+      typeof WHM.extractShaderMapFromRsgm !== "function" ||
+      typeof WHM.findRsgmFolderBody !== "function"
+    ) {
+      return {};
+    }
+    if (global.Chunky.skipRelicChunky(u8) < 0) return {};
+    var offPrimary =
+      typeof global.Chunky.getFirstChunkOffset === "function"
+        ? global.Chunky.getFirstChunkOffset(u8)
+        : 28;
+    if (offPrimary < 0) return {};
+    var offAlt = offPrimary === 28 ? 24 : 28;
+    var rsgm = WHM.findRsgmFolderBody(u8, offPrimary);
+    if (!rsgm && u8.length >= offAlt) {
+      rsgm = WHM.findRsgmFolderBody(u8, offAlt);
+    }
+    if (!rsgm) return {};
+    return WHM.extractShaderMapFromRsgm(rsgm) || {};
+  }
+
+  /**
+   * Reference-only WHMs (no embedded vertices): load listed .whm paths from archives.
+   * Files that already embed meshes are shown as-is only. Skeleton / clips stay on the primary file in load().
+   * @param {Uint8Array} u8
+   * @param {function(string): Promise<Uint8Array | null>} resolveReferencedWhm — logical path without .whm
+   * @param {{ primaryWhmPath?: string | null }} [mergeOpts] — skip ref rows that point at this .whm (self-reference)
+   */
+  async function extractMeshesWithReferencedGeometry(u8, resolveReferencedWhm, mergeOpts) {
+    mergeOpts = mergeOpts || {};
+    var skipKey =
+      mergeOpts.primaryWhmPath != null && String(mergeOpts.primaryWhmPath).length
+        ? normalizeWhmPathKeyLower(mergeOpts.primaryWhmPath)
+        : "";
+
+    var first = WHM.extractMeshes(u8);
+
+    if (!first.ok) {
+      if (
+        first.referenceOnly &&
+        first.referenceEntries &&
+        first.referenceEntries.length &&
+        typeof resolveReferencedWhm === "function"
+      ) {
+        var primaryShaderOnly = getPrimaryShaderMapFromWhmBytes(u8);
+        var pulledOnly = await appendMeshesFromReferencedWhmPaths(
+          first.referenceEntries,
+          resolveReferencedWhm,
+          skipKey
+        );
+        if (!pulledOnly.meshes.length) {
+          return {
+            ok: false,
+            error:
+              first.error ||
+              "Referenced mesh WHM files were not found in loaded archives or contained no geometry.",
+          };
+        }
+        return {
+          ok: true,
+          meshes: pulledOnly.meshes,
+          shaderMap: mergeShaderMapPrimaryWins(primaryShaderOnly, pulledOnly.mergedShader),
+        };
+      }
+      return first;
+    }
+
+    /* Embedded geometry present: show this file only. Xref list rows are for tools / attachment;
+     * merging every listed .whm explodes preview size (e.g. apothecary.whm). Reference-only WHMs still use the path above. */
+    return first;
+  }
+
   /** Shared matcap; clones per offscreen thumb so materials can be disposed independently. */
   var gridThumbMatcapBase = null;
   var gridThumbMatcapBasePromise = null;
@@ -1185,11 +1363,12 @@
    * Offscreen WHM shot for file grid: same fit + yaw/pitch as the interactive preview after load.
    * @param {Uint8Array} u8
    * @param {function(string): Promise<Uint8Array | null> | null} resolveTextureFile — null = matcap only
+   * @param {function(string): Promise<Uint8Array | null> | null} [resolveReferencedWhm]
    */
-  async function renderWhmGridThumbnail(u8, resolveTextureFile) {
+  async function renderWhmGridThumbnail(u8, resolveTextureFile, resolveReferencedWhm) {
     var THREE = getTHREE();
     if (!THREE || typeof global.WHM === "undefined" || !u8 || !u8.byteLength) return null;
-    var extracted = WHM.extractMeshes(u8);
+    var extracted = await extractMeshesWithReferencedGeometry(u8, resolveReferencedWhm, {});
     if (!extracted.ok) return null;
 
     var textureMap = {};
@@ -1457,6 +1636,7 @@
    * @param {{
    *   wheBytes?: Uint8Array | null,
    *   whmLogicalPath?: string | null,
+   *   resolveReferencedWhm?: function(string): Promise<Uint8Array | null>,
    * }} [options]
    */
   async function load(u8, canvasEl, sidebarEl, resolveTextureFile, options) {
@@ -1468,7 +1648,9 @@
     canvas = canvasEl;
     sidebarRef = sidebarEl || null;
     var opts = options || {};
-    var extracted = WHM.extractMeshes(u8);
+    var extracted = await extractMeshesWithReferencedGeometry(u8, opts.resolveReferencedWhm, {
+      primaryWhmPath: opts.whmLogicalPath || null,
+    });
     if (!extracted.ok) {
       return extracted;
     }
@@ -1614,9 +1796,9 @@
     load: load,
     dispose: dispose,
     resize: onResize,
-    /** @param {Uint8Array} u8 @param {function(string): Promise<Uint8Array | null> | null} resolveTextureFile */
-    renderGridThumbnail: function (u8, resolveTextureFile) {
-      return renderWhmGridThumbnail(u8, resolveTextureFile);
+    /** @param {Uint8Array} u @param {function(string): Promise<Uint8Array | null> | null} tex @param {function(string): Promise<Uint8Array | null> | null} [refWhm] */
+    renderGridThumbnail: function (u, tex, refWhm) {
+      return renderWhmGridThumbnail(u, tex, refWhm);
     },
     /** @returns {{ label: string, texture: object, previewCanvas?: object, previewImageData?: ImageData | null }[]} */
     getTextureCatalog: function () {

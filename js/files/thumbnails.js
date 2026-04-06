@@ -3,7 +3,7 @@
 import { state } from "../state.js";
 import { $ } from "../util.js";
 import { mimeForRasterExt } from "./kinds.js";
-import { resolveWhmTextureFile } from "../preview/whm.js";
+import { resolveWhmTextureFile, resolveWhmReferencedModel } from "../preview/whm.js";
 
 export function thumbCanvasToBlob(canvas, maxDim, callback) {
   var w = canvas.width;
@@ -157,7 +157,7 @@ export function loadGridThumbnailForPreview(previewEl) {
           state.gridThumbObjectUrls.push(u);
           img.src = u;
         }
-        return WhmPreview.renderGridThumbnail(data, null)
+        return WhmPreview.renderGridThumbnail(data, null, resolveWhmReferencedModel)
           .then(function (canvasFast) {
             if (!canvasFast) throw new Error("whm fast");
             return new Promise(function (resolve, reject) {
@@ -176,7 +176,11 @@ export function loadGridThumbnailForPreview(previewEl) {
             });
           })
           .then(function () {
-            return WhmPreview.renderGridThumbnail(data, resolveWhmTextureFile);
+            return WhmPreview.renderGridThumbnail(
+              data,
+              resolveWhmTextureFile,
+              resolveWhmReferencedModel
+            );
           })
           .then(function (canvasFull) {
             if (!previewEl.isConnected || !canvasFull) return;

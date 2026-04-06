@@ -498,6 +498,34 @@ function hidePreviewWhmWrap() {
  * @param {string} pathNoExt e.g. art/ebps/races/space_marines/texture_share/chaplain
  * @returns {Promise<Uint8Array | null>}
  */
+/**
+ * Resolve a Relic logical path to .whm bytes (reference-only MSGR rows).
+ * @param {string} pathNoExt e.g. art/ebps/races/space_marines/.../base_mesh/foo (with or without .whm)
+ * @returns {Promise<Uint8Array | null>}
+ */
+export async function resolveWhmReferencedModel(pathNoExt) {
+  if (typeof SGA === "undefined" || typeof SGA.findFileByLogicalPath !== "function") {
+    return null;
+  }
+  var rel = String(pathNoExt || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\.whm$/i, "");
+  if (!rel) return null;
+  var candidates = [rel + ".whm", rel.replace(/\//g, "\\") + ".whm"];
+  for (var ai = 0; ai < state.archives.length; ai++) {
+    var ent = state.archives[ai];
+    if (!ent || !ent.parsed) continue;
+    for (var ci = 0; ci < candidates.length; ci++) {
+      var fe = SGA.findFileByLogicalPath(ent.parsed, candidates[ci]);
+      if (fe) {
+        return await SGA.readFileData(ent.parsed, fe);
+      }
+    }
+  }
+  return null;
+}
+
 export async function resolveWhmTextureFile(pathNoExt) {
   if (typeof SGA === "undefined" || typeof SGA.findFileByLogicalPath !== "function") {
     return null;
@@ -613,6 +641,7 @@ export function setPreviewWhm(u8, fileName) {
       return WhmPreview.load(u8, canvas, sidebar, resolveWhmTextureFile, {
         wheBytes: wheBytes,
         whmLogicalPath: fileName,
+        resolveReferencedWhm: resolveWhmReferencedModel,
       });
     })
     .then(function (r) {

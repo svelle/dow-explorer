@@ -857,6 +857,11 @@ body.sidebar-resizing * {
   font-variant-numeric: tabular-nums;
 }
 
+/* Selected row uses accent-tinted background; keep counts readable (muted is too dim). */
+.tree-row.selected .tree-label-count {
+  color: color-mix(in srgb, var(--text) 88%, var(--muted) 12%);
+}
+
 .tree-row--chain .tree-label-primary.tree-label--chain {
   font-size: 0.74rem;
   letter-spacing: -0.01em;
