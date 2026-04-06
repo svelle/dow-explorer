@@ -1,3 +1,23 @@
 node_modules/
 dist/
 .ref-tmp/
+
+# Retail / copyrighted game assets (Soulstorm, SGA contents, Relic formats).
+# Remove or use `git add -f` only for assets you have rights to redistribute.
+*.abp
+*.dds
+*.decal
+*.fda
+*.prefab
+*.prt
+*.ptx
+*.rgd
+*.rsh
+*.rtm
+*.sga
+*.sgb
+*.tga
+*.ucs
+*.whm
+*.whe
+*.wtp

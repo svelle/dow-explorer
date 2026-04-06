@@ -15,6 +15,7 @@ The only listed dependency is **`three`** (Three.js), used for the WHM WebGL pre
 ```bash
 git clone <repository-url>
 cd dow-sga-browser
+bun install
 bun dev
 ```
 
@@ -34,9 +35,9 @@ After a fresh clone, `dist/` may be missing until you run `bun dev` or `bun run 
 
 ## Using the app
 
-- **Choose .sga** or **Open .sga** opens the system file picker (or the File System Access API where supported).
+- **Choose .sga** or **Open .sga** opens the system file picker (or the File System Access API where supported). If picking files fails in a restricted context, the app falls back to a classic file input.
 - **Drag and drop** `.sga` files onto the page.
-- **Recent files** can reopen archives if the browser still has permission (Chromium) or if you have a backend that implements `**GET /api/read-sga?path=…`** for absolute paths stored in recent history.
+- **Recent files** — Reopen works when (a) Chromium has a saved **file handle** for the entry, or (b) the entry has an absolute path and your environment serves **`GET /api/read-sga?path=…`**. Embedded or IDE-built-in browsers often block handle access; use a normal **Chrome** or **Edge** window, or pick the file again with **Choose .sga**. Failures show a **dismissible banner** at the top of the page (not only a system dialog).
 
 ## Project layout
 
