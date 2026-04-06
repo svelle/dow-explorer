@@ -59,6 +59,31 @@ Private repos may need a paid plan for Pages; see GitHub’s docs.
 - **Drag and drop** `.sga` files onto the page.
 - **Recent files** — Reopen works when (a) Chromium has a saved **file handle** for the entry, or (b) the entry has an absolute path and your environment serves **`GET /api/read-sga?path=…`**. Embedded or IDE-built-in browsers often block handle access; use a normal **Chrome** or **Edge** window, or pick the file again with **Choose .sga**. Failures show a **dismissible banner** at the top of the page (not only a system dialog).
 
+## Preview support
+
+The preview panel picks a viewer by **file extension** (see `js/preview/index.js`).
+
+**Structured / media**
+
+| Extension | Preview |
+| --- | --- |
+| `.whm` | 3D mesh (WebGL / Three.js), materials and animation controls |
+| `.rgd` | Parsed game-data tree |
+| `.wtp` | Team colour texture |
+| `.ucs` | Localization string table |
+| `.whe` | Relic Chunky file tree |
+| `.fda` | Audio (decoded to WAV for the built-in player) |
+| `.rsh` | Shader / embedded texture (DDS path when present) |
+| `.tga`, `.dds` | Decoded image |
+
+**Text**
+
+Readable **UTF-8** with line numbers (large files are truncated): `.lua`, `.scar`, `.events`, `.sgb`, `.ai`, `.nis`, `.teamcolour`, `.rml`, `.txt`, `.md`, `.xml`, `.csv`, `.json`, `.html`, `.glsl`, `.hlsl`, `.cs`, `.cpp`, `.h`. Other files may still open as text if the first bytes look like plain ASCII/UTF-8.
+
+**Fallback**
+
+Everything else shows a **hex** preview (first part of the file). That includes formats you might expect in data archives but that are not decoded yet—for example **`.ogg`**, **`.wav`**, **`.mp3`**, or typical web rasters like **`.png`** / **`.jpg`**.
+
 ## Project layout
 
 - `[docs/MODULES.md](docs/MODULES.md)` — module map (what each `js/` file does; for maintainers and agents).
