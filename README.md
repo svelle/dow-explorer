@@ -4,6 +4,14 @@ A browser-based explorer for **Dawn of War — Soulstorm** `.sga` archives: fold
 
 <img width="2253" height="1267" alt="image" src="https://github.com/user-attachments/assets/49b5c99d-78fb-44b0-b0c2-42475b3372bd" />
 
+<img width="2251" height="1269" alt="image" src="https://github.com/user-attachments/assets/96c096c0-c703-432d-a64e-880479c36052" />
+
+<img width="2250" height="1268" alt="image" src="https://github.com/user-attachments/assets/d959aeae-7b3b-4c4f-b859-b86239755bce" />
+
+<img width="2253" height="1264" alt="image" src="https://github.com/user-attachments/assets/5819e077-6a4e-4bec-a14c-ee6efc7c8a7f" />
+
+
+
 **Live site:** [https://svelle.github.io/dow-explorer/](https://svelle.github.io/dow-explorer/)
 
 The UI is bundled with [Bun](https://bun.sh): `[js/three-global.js](js/three-global.js)` → `dist/three-global.js` (sets `globalThis.THREE` from the [`three`](https://www.npmjs.com/package/three) package), and `[js/main.js](js/main.js)` → `dist/main.js`. Legacy parsers and other globals (`SGA`, `TGA`, `DDS`, `WhmPreview`, etc.) stay as separate scripts in `[index.html](index.html)`.
