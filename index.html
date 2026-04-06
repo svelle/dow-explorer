@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SGA Browser</title>
+  <script>
+    (function () {
+      try {
+        var PAL = "sga-browser-palette";
+        var APP = "sga-browser-appearance";
+        var LEG = "sga-browser-theme";
+        var legacy = localStorage.getItem(LEG);
+        var pal = localStorage.getItem(PAL);
+        var app = localStorage.getItem(APP);
+        if (legacy && !pal && !app) {
+          var map = {
+            light: ["mechanicus", "light"],
+            lumen: ["mechanicus", "light"],
+            dark: ["mechanicus", "dark"],
+            noctis: ["mechanicus", "dark"],
+            necron: ["necron", "dark"],
+            "necron-light": ["necron", "light"],
+            ork: ["ork", "dark"],
+            "ork-light": ["ork", "light"],
+          };
+          if (map[legacy]) {
+            pal = map[legacy][0];
+            app = map[legacy][1];
+            localStorage.setItem(PAL, pal);
+            localStorage.setItem(APP, app);
+            localStorage.removeItem(LEG);
+          }
+        }
+        pal = pal || "mechanicus";
+        app = app || "dark";
+        function resolve(p, a) {
+          var L = a === "light";
+          if (p === "mechanicus") return L ? "lumen" : "noctis";
+          if (p === "necron") return L ? "necron-light" : "necron";
+          if (p === "ork") return L ? "ork-light" : "ork";
+          return "noctis";
+        }
+        var t = resolve(pal, app);
+        if (t !== "noctis") document.documentElement.setAttribute("data-theme", t);
+        else document.documentElement.removeAttribute("data-theme");
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="splash" class="splash" aria-hidden="false">
+    <div class="splash-inner">
+      <h2 class="splash-title">Open an archive</h2>
+      <p class="splash-lead">Select a Dawn of War <strong>.sga</strong> file to browse its folders and files.</p>
+      <button type="button" id="splash-open" class="btn primary splash-cta">Choose .sga file</button>
+      <p class="splash-hint">Or drag and drop one or more archives anywhere on this page.</p>
+      <section class="recent-section" id="recent-section" hidden>
+        <h3 class="recent-heading">Recently opened</h3>
+        <p class="recent-note">Recent files reopen via a saved file permission (Chromium) or an absolute path (if your backend exposes <code>/api/read-sga</code>). Names alone cannot be reopened—use <strong>Choose .sga</strong> so the browser can remember the file.</p>
+        <ul id="recent-list" class="recent-list"></ul>
+      </section>
+    </div>
+  </div>
+
+  <div id="app-root" class="app-root" aria-hidden="true">
+  <header class="top-bar">
+    <div class="brand">
+      <h1>SGA Browser</h1>
+      <p class="subtitle">Dawn of War — Soulstorm</p>
+    </div>
+    <div class="top-actions">
+      <div class="theme-controls" role="group" aria-label="Theme">
+        <button
+          type="button"
+          id="theme-appearance-toggle"
+          class="btn theme-appearance-toggle"
+          title="Toggle light and dark appearance"
+          aria-label="Toggle light and dark appearance"
+        >
+          ☀
+        </button>
+        <label class="theme-select-wrap">
+          <span class="visually-hidden">Protocol palette</span>
+          <select id="theme-palette-select" class="theme-select" aria-label="Protocol palette" title="Tactical Archive Protocol — palette">
+            <option value="mechanicus">Mechanicus</option>
+            <option value="necron">Necron</option>
+            <option value="ork">Ork</option>
+          </select>
+        </label>
+      </div>
+      <input type="search" id="filter-input" class="filter-input" placeholder="Filter files..." autocomplete="off">
+      <button type="button" id="open-btn" class="btn primary">Open .sga</button>
+      <input type="file" id="file-input" accept=".sga" multiple hidden>
+    </div>
+  </header>
+
+  <div class="layout" id="app-layout">
+    <aside class="pane sidebar-left" id="sidebar-left">
+      <button
+        type="button"
+        id="sidebar-left-toggle"
+        class="sidebar-left-toggle"
+        aria-expanded="true"
+        aria-controls="sidebar-left-inner"
+        title="Collapse folder panel"
+      >
+        <span class="sidebar-left-toggle-icon" aria-hidden="true">◀</span>
+      </button>
+      <div id="sidebar-left-inner" class="sidebar-left-inner">
+      <h2 class="pane-title">Archives loaded (<span id="archive-count">0</span>)</h2>
+      <ul id="archive-list" class="archive-list"></ul>
+      <div class="tree-pins-block" id="tree-pins-block">
+        <button type="button" class="tree-pins-head" id="tree-pins-toggle" aria-expanded="true" aria-controls="tree-pins-list">
+          <span class="tree-pins-chevron" aria-hidden="true">▼</span>
+          <span>Pinned folders</span>
+        </button>
+        <ul id="tree-pins-list" class="tree-pins-list" role="list"></ul>
+      </div>
+      <h2 class="pane-title sub">Contents</h2>
+      <div class="tree-filter-wrap">
+        <label class="visually-hidden" for="tree-filter-input">Filter folder tree</label>
+        <input
+          type="search"
+          id="tree-filter-input"
+          class="tree-filter-input"
+          placeholder="Filter folders…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+      <div id="tree-container" class="tree-container" tabindex="0" role="tree" aria-label="Folder tree"></div>
+      </div>
+    </aside>
+
+    <main class="pane main-pane">
+      <div class="main-head">
+        <nav class="path-bar path-bar--breadcrumb" id="path-bar" aria-label="Current folder path">—</nav>
+        <div class="main-meta">
+          <span id="folder-summary">—</span>
+          <div class="view-toggle">
+            <button type="button" id="view-grid" class="btn toggle active">Grid</button>
+            <button type="button" id="view-list" class="btn toggle">List</button>
+          </div>
+        </div>
+      </div>
+      <div id="file-view" class="file-view grid" tabindex="0" role="listbox" aria-label="Files" aria-multiselectable="false"></div>
+    </main>
+
+    <aside class="pane sidebar-right">
+      <div
+        class="sidebar-resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize inspector panel"
+        tabindex="0"
+      ></div>
+      <div class="preview-box">
+        <div class="preview-label">Preview</div>
+        <div id="preview-body" class="preview-body">
+          <div id="preview-text-wrap" class="preview-text-wrap">
+            <div id="preview-line-gutter" class="preview-line-gutter" aria-hidden="true" hidden></div>
+            <pre id="preview-content" class="preview-pre">Select a file</pre>
+          </div>
+          <img id="preview-image" class="preview-image" alt="" hidden />
+          <div id="preview-whm-wrap" class="preview-whm-wrap" hidden>
+            <div class="preview-whm-inner">
+              <button
+                type="button"
+                id="preview-whm-meshes-toggle"
+                class="preview-whm-meshes-toggle"
+                hidden
+                aria-expanded="true"
+                aria-controls="preview-whm-sidebar"
+                aria-label="Hide mesh list"
+                title="Hide mesh list"
+              >
+                <span class="preview-whm-meshes-toggle-icon" aria-hidden="true">◀</span>
+              </button>
+              <aside id="preview-whm-sidebar" class="preview-whm-sidebar" hidden aria-label="Mesh slices"></aside>
+              <div id="preview-whm-canvas-wrap" class="preview-whm-canvas-wrap">
+                <canvas id="preview-whm-canvas" class="preview-whm-canvas" tabindex="-1" aria-label="3D model preview"></canvas>
+                <div id="preview-whm-texture-wrap" class="preview-whm-texture-wrap" hidden aria-hidden="true">
+                  <canvas id="preview-whm-texture-canvas" class="preview-whm-texture-canvas" aria-label="Diffuse texture"></canvas>
+                  <div id="preview-whm-texture-select-row" class="preview-whm-texture-select-row" hidden>
+                    <div id="preview-whm-texture-map-wrap" class="preview-whm-texture-map-wrap" hidden>
+                      <label class="preview-whm-texture-select-label" for="preview-whm-texture-select">Map</label>
+                      <select id="preview-whm-texture-select" class="preview-whm-texture-select" aria-label="Texture map"></select>
+                    </div>
+                    <label class="preview-whm-uv-overlay-label">
+                      <input type="checkbox" id="preview-whm-uv-overlay" />
+                      UV overlay
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="preview-whm-toolbar">
+              <div class="preview-whm-toolbar-start">
+                <div class="preview-whm-view-toggle view-toggle" role="group" aria-label="WHM preview mode">
+                  <button type="button" id="preview-whm-mode-model" class="btn toggle active" aria-pressed="true">Model</button>
+                  <button type="button" id="preview-whm-mode-texture" class="btn toggle" aria-pressed="false" disabled>Texture</button>
+                </div>
+                <label id="preview-whm-display-label" class="preview-whm-display-label">
+                  <span class="preview-whm-display-label-text">Display</span>
+                  <select id="preview-whm-display-mode" class="preview-whm-display-select" aria-label="Model display mode" title="Shading / view mode for the 3D model">
+                    <option value="shaded">Shaded</option>
+                    <option value="wireframe">Wireframe</option>
+                  </select>
+                </label>
+              </div>
+              <p id="preview-whm-hint" class="preview-whm-hint">
+                Drag to rotate · wheel to zoom · XYZ gizmo bottom-right
+              </p>
+            </div>
+          </div>
+          <div id="preview-audio-wrap" class="preview-audio-wrap" hidden>
+            <div class="preview-audio-card">
+              <div class="preview-audio-art file-card-preview--kind-audio">
+                <div class="preview-audio-art-icon-wrap">
+                  <span class="file-kind-icon preview-audio-kind-icon" id="preview-audio-icon-slot" aria-hidden="true"></span>
+                </div>
+                <p class="preview-audio-filename" id="preview-audio-filename"></p>
+              </div>
+              <div class="preview-audio-controls">
+                <div class="preview-audio-seek-wrap">
+                  <input
+                    type="range"
+                    id="preview-audio-seek"
+                    class="preview-audio-seek"
+                    min="0"
+                    max="1"
+                    step="any"
+                    value="0"
+                    aria-label="Seek"
+                  />
+                </div>
+                <div class="preview-audio-controls-row">
+                  <button type="button" id="preview-audio-play" class="btn preview-audio-btn" aria-label="Play">▶</button>
+                  <span class="preview-audio-time">
+                    <span id="preview-audio-cur">0:00</span>
+                    <span class="preview-audio-sep"> / </span>
+                    <span id="preview-audio-dur">0:00</span>
+                  </span>
+                  <label class="preview-audio-vol-label">
+                    <span class="preview-audio-vol-text">Volume</span>
+                    <input type="range" id="preview-audio-volume" min="0" max="1" step="0.01" value="0.25" />
+                  </label>
+                </div>
+              </div>
+            </div>
+            <audio id="preview-audio" preload="metadata"></audio>
+          </div>
+        </div>
+      </div>
+      <div id="inspector" class="inspector">
+        <p class="muted">No file selected</p>
+      </div>
+      <div class="action-row action-row--inline" role="group" aria-label="File actions">
+        <button type="button" id="btn-extract" class="btn btn-inspector-action" disabled aria-label="Extract file">
+          <svg class="btn-inspector-action-icon" xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor" aria-hidden="true"><path d="M480-560 320-400l56 56 64-64v168h80v-168l64 64 56-56-160-160Zm-280-80v440h560v-440H200Zm0 520q-33 0-56.5-23.5T120-200v-499q0-14 4.5-27t13.5-24l50-61q11-14 27.5-21.5T250-840h460q18 0 34.5 7.5T772-811l50 61q9 11 13.5 24t4.5 27v499q0 33-23.5 56.5T760-120H200Zm16-600h528l-34-40H250l-34 40Zm264 300Z"/></svg>
+          <span>Extract</span>
+        </button>
+        <button type="button" id="btn-hex" class="btn btn-inspector-action" disabled aria-label="View hex dump">
+          <svg class="btn-inspector-action-icon" xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor" aria-hidden="true"><path d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z"/></svg>
+          <span>View hex</span>
+        </button>
+      </div>
+    </aside>
+  </div>
+  </div>
+
+  <div id="hex-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-close="1"></div>
+    <div class="modal-dialog">
+      <div class="modal-head">
+        <span id="hex-title">Hex</span>
+        <button type="button" class="btn icon" id="hex-close" aria-label="Close">×</button>
+      </div>
+      <pre id="hex-body" class="hex-body"></pre>
+    </div>
+  </div>
+
+  <div id="tree-context-menu" class="context-menu" hidden role="menu" aria-label="Folder actions"></div>
+  <script defer src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
+  <script defer src="js/sga.js"></script>
+  <script defer src="js/file-kind-icons.js"></script>
+  <script defer src="js/tga.js"></script>
+  <script defer src="js/dds.js"></script>
+  <script defer src="js/fda.js"></script>
+  <script defer src="js/chunky.js"></script>
+  <script defer src="js/rsh.js"></script>
+  <script defer src="js/whm.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script defer src="js/whm-preview.js"></script>
+  <script type="module" src="dist/main.js"></script>
+</body>
+</html>
